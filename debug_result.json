@@ -1,0 +1,20 @@
+{
+  "logs": [],
+  "notifications": [
+    {
+      "_id": "696bb8b5dd4650c2be0f6d4a",
+      "phone": "916369879920",
+      "title": "sleep",
+      "message": "go to sleep",
+      "reminderTime": "22:00",
+      "followUpMessage": "Did you complete your habit?",
+      "followUpDelay": 1,
+      "isActive": true,
+      "followUpSent": false,
+      "dailyStatus": "pending",
+      "createdAt": "2026-01-17T16:28:37.491Z",
+      "updatedAt": "2026-01-17T16:28:37.491Z",
+      "__v": 0
+    }
+  ]
+}

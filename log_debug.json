@@ -1,0 +1,26 @@
+{
+  "_id": "696bc633f3c856865108e633",
+  "reminderId": "696bc57bf3c856865108e61d",
+  "phone": "916369879920",
+  "direction": "outbound",
+  "messageType": "reminder",
+  "content": "sleep well\n",
+  "status": "sent",
+  "rawResponse": {
+    "messaging_product": "whatsapp",
+    "contacts": [
+      {
+        "input": "916369879920",
+        "wa_id": "916369879920"
+      }
+    ],
+    "messages": [
+      {
+        "id": "wamid.HBgMOTE2MzY5ODc5OTIwFQIAERgSMkY4Q0VGQTcyQTA0RTlERTA0AA=="
+      }
+    ]
+  },
+  "createdAt": "2026-01-17T17:26:11.656Z",
+  "updatedAt": "2026-01-17T17:26:11.656Z",
+  "__v": 0
+}

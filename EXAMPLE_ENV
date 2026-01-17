@@ -1,0 +1,5 @@
+MONGODB_URI="mongodb+srv://<username>:<password>@cluster0.mongodb.net/habbitverse?retryWrites=true&w=majority"
+JWT_SECRET_KEY="your-secure-random-string-at-least-32-chars"
+WHATSAPP_PHONE_NUMBER_ID="123456789012345"
+WHATSAPP_ACCESS_TOKEN="EAAG..."
+WHATSAPP_VERIFY_TOKEN="my-secret-verify-token-123"
