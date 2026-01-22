@@ -123,56 +123,96 @@ export async function GET(req: NextRequest) {
   }
 
   // --- 2. Process FOLLOW-UPS ---
+  // Queries only reminders that are ALREADY 'sent' today.
   const activeFollowUps = await Reminder.find({
     isActive: true,
     dailyStatus: "sent",
     followUpSent: false,
   });
 
+  if (activeFollowUps.length > 0) {
+    console.log(
+      `[Cron] Found ${activeFollowUps.length} candidates for follow-up.`
+    );
+  }
+
   for (const reminder of activeFollowUps) {
-    if (!isTodayIST(reminder.lastSentAt)) {
-      continue; // Stale
-    }
+    try {
+      if (!isTodayIST(reminder.lastSentAt)) {
+        continue; // Stale data from yesterday
+      }
 
-    const followUpMinutes = getMinutesFromMidnight(reminder.followUpTime);
-
-    if (reminder.followUpTime && nowMinutes >= followUpMinutes) {
-      const res = await sendWhatsAppMessage(
-        reminder.phone,
-        reminder.followUpMessage
-      );
-
-      await MessageLog.create({
-        reminderId: reminder._id,
-        phone: reminder.phone,
-        direction: "outbound",
-        messageType: "followup",
-        content: reminder.followUpMessage,
-        status: res.success ? "sent" : "failed",
-        rawResponse: res.data || res.error,
-      });
-
-      if (res.success) {
-        reminder.followUpSent = true;
-        reminder.dailyStatus = "missed";
-        await reminder.save();
+      if (!reminder.followUpTime) {
         results.push({
           id: reminder._id,
-          status: "sent_followup",
-          phone: reminder.phone,
+          status: "skipped_followup",
+          reason: "no_followup_time_set",
         });
+        continue;
+      }
+
+      const followUpMinutes = getMinutesFromMidnight(reminder.followUpTime);
+
+      if (nowMinutes >= followUpMinutes) {
+        // EXTRA SAFETY: Ensure follow-up time is actually AFTER reminder time
+        // (Prevents misconfiguration where followUp <= reminder)
+        const reminderMinutes = getMinutesFromMidnight(reminder.reminderTime);
+        if (followUpMinutes <= reminderMinutes) {
+          results.push({
+            id: reminder._id,
+            status: "skipped_followup",
+            reason: "config_error_followup_too_early",
+            warning: "Follow-up time must be AFTER reminder time",
+          });
+          continue;
+        }
+
+        const res = await sendWhatsAppMessage(
+          reminder.phone,
+          reminder.followUpMessage || "Did you complete your habit?"
+        );
+
+        await MessageLog.create({
+          reminderId: reminder._id,
+          phone: reminder.phone,
+          direction: "outbound",
+          messageType: "followup",
+          content: reminder.followUpMessage,
+          status: res.success ? "sent" : "failed",
+          rawResponse: res.data || res.error,
+        });
+
+        if (res.success) {
+          reminder.followUpSent = true;
+          reminder.dailyStatus = "missed";
+          await reminder.save();
+          results.push({
+            id: reminder._id,
+            status: "sent_followup",
+            phone: reminder.phone,
+          });
+        } else {
+          results.push({
+            id: reminder._id,
+            status: "failed_followup",
+            error: res.error,
+          });
+        }
       } else {
         results.push({
           id: reminder._id,
-          status: "failed_followup",
-          error: res.error,
+          status: "skipped_followup",
+          reason: "time_not_reached",
+          followUpTime: reminder.followUpTime,
+          now: nowTimeStr,
         });
       }
-    } else {
+    } catch (err: any) {
+      console.error(`[Cron] Error processing follow-up ${reminder._id}:`, err);
       results.push({
         id: reminder._id,
-        status: "skipped_followup",
-        reason: "time_not_reached",
+        status: "error_processing_followup",
+        error: err.message,
       });
     }
   }
