@@ -154,8 +154,32 @@ export async function GET(req: NextRequest) {
       const followUpMinutes = getMinutesFromMidnight(reminder.followUpTime);
 
       if (nowMinutes >= followUpMinutes) {
+        // 🚨 CRITICAL: RE-FETCH from DB to ensure 'replied' is still false
+        // This prevents race conditions where user replied 1 second ago
+        const FRESH_REMINDER = await Reminder.findById(reminder._id);
+
+        if (!FRESH_REMINDER) continue; // Deleted?
+
+        // If user has REPLIED, we MUST NOT send the follow-up
+        if (
+          FRESH_REMINDER.dailyStatus === "replied" ||
+          FRESH_REMINDER.dailyStatus === "missed"
+        ) {
+          results.push({
+            id: reminder._id,
+            status: "cancelled_followup",
+            reason: "user_already_replied_or_handled",
+            currentStatus: FRESH_REMINDER.dailyStatus,
+          });
+          continue;
+        }
+
+        // Also check idempotency again on fresh object
+        if (FRESH_REMINDER.followUpSent) {
+          continue;
+        }
+
         // EXTRA SAFETY: Ensure follow-up time is actually AFTER reminder time
-        // (Prevents misconfiguration where followUp <= reminder)
         const reminderMinutes = getMinutesFromMidnight(reminder.reminderTime);
         if (followUpMinutes <= reminderMinutes) {
           results.push({
