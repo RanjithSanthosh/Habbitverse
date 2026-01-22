@@ -29,6 +29,13 @@ const isTodayIST = (paramsDate?: Date) => {
   return istNow === istParam;
 };
 
+// Helper: Convert "HH:MM" to minutes from midnight
+const getMinutesFromMidnight = (timeStr: string) => {
+  if (!timeStr) return -1;
+  const [hours, minutes] = timeStr.split(":").map(Number);
+  return hours * 60 + minutes;
+};
+
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -37,19 +44,16 @@ export async function GET(req: NextRequest) {
 
   await dbConnect();
 
-  // We get current time in IST
   const nowTimeStr = getISTTime();
+  const nowMinutes = getMinutesFromMidnight(nowTimeStr);
 
-  console.log(`[Cron] Running at IST: ${nowTimeStr}`);
+  console.log(`[Cron] Running at IST: ${nowTimeStr} (${nowMinutes}m)`);
 
   // --- 1. Process REMINDERS ---
-  // We fetch ALL active reminders to check if they are due (Catch-up logic)
   const activeReminders = await Reminder.find({ isActive: true });
-
   const results = [];
 
   for (const reminder of activeReminders) {
-    // IDEMPOTENCY CHECK:
     if (isTodayIST(reminder.lastSentAt)) {
       results.push({
         id: reminder._id,
@@ -60,12 +64,12 @@ export async function GET(req: NextRequest) {
       continue;
     }
 
-    // CATCH-UP LOGIC:
-    if (nowTimeStr >= reminder.reminderTime) {
-      // Send Message
+    const reminderMinutes = getMinutesFromMidnight(reminder.reminderTime);
+
+    // ROBUST CHECK: Integers instead of strings
+    if (nowMinutes >= reminderMinutes) {
       const res = await sendWhatsAppMessage(reminder.phone, reminder.message);
 
-      // Log It
       await MessageLog.create({
         reminderId: reminder._id,
         phone: reminder.phone,
@@ -77,7 +81,6 @@ export async function GET(req: NextRequest) {
       });
 
       if (res.success) {
-        // Mark as Sent
         reminder.lastSentAt = new Date();
         reminder.followUpSent = false;
         reminder.dailyStatus = "sent";
@@ -121,7 +124,9 @@ export async function GET(req: NextRequest) {
       continue; // Stale
     }
 
-    if (reminder.followUpTime && nowTimeStr >= reminder.followUpTime) {
+    const followUpMinutes = getMinutesFromMidnight(reminder.followUpTime);
+
+    if (reminder.followUpTime && nowMinutes >= followUpMinutes) {
       const res = await sendWhatsAppMessage(
         reminder.phone,
         reminder.followUpMessage
