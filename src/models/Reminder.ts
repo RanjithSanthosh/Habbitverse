@@ -27,8 +27,9 @@ const ReminderSchema = new Schema<IReminder>(
     title: { type: String, required: true },
     message: { type: String, required: true },
     reminderTime: { type: String, required: true }, // Format: "14:30"
+
     followUpMessage: { type: String },
-    followUpTime: { type: String, required: true }, // Format: "15:00"
+    followUpTime: { type: String }, // Format: "15:00"
     isActive: { type: Boolean, default: true },
 
     lastSentAt: { type: Date },

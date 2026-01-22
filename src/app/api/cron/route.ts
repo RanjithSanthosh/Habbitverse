@@ -54,60 +54,70 @@ export async function GET(req: NextRequest) {
   const results = [];
 
   for (const reminder of activeReminders) {
-    if (isTodayIST(reminder.lastSentAt)) {
-      results.push({
-        id: reminder._id,
-        status: "skipped",
-        reason: "already_sent_today",
-        lastSentAt: reminder.lastSentAt,
-      });
-      continue;
-    }
-
-    const reminderMinutes = getMinutesFromMidnight(reminder.reminderTime);
-
-    // ROBUST CHECK: Integers instead of strings
-    if (nowMinutes >= reminderMinutes) {
-      const res = await sendWhatsAppMessage(reminder.phone, reminder.message);
-
-      await MessageLog.create({
-        reminderId: reminder._id,
-        phone: reminder.phone,
-        direction: "outbound",
-        messageType: "reminder",
-        content: reminder.message,
-        status: res.success ? "sent" : "failed",
-        rawResponse: res.data || res.error,
-      });
-
-      if (res.success) {
-        reminder.lastSentAt = new Date();
-        reminder.followUpSent = false;
-        reminder.dailyStatus = "sent";
-        reminder.replyText = undefined;
-        reminder.lastRepliedAt = undefined;
-        await reminder.save();
-
+    try {
+      if (isTodayIST(reminder.lastSentAt)) {
         results.push({
           id: reminder._id,
-          status: "sent_reminder",
-          phone: reminder.phone,
+          status: "skipped",
+          reason: "already_sent_today",
+          lastSentAt: reminder.lastSentAt,
         });
+        continue;
+      }
+
+      const reminderMinutes = getMinutesFromMidnight(reminder.reminderTime);
+
+      // ROBUST CHECK: Integers instead of strings
+      if (nowMinutes >= reminderMinutes) {
+        const res = await sendWhatsAppMessage(reminder.phone, reminder.message);
+
+        await MessageLog.create({
+          reminderId: reminder._id,
+          phone: reminder.phone,
+          direction: "outbound",
+          messageType: "reminder",
+          content: reminder.message,
+          status: res.success ? "sent" : "failed",
+          rawResponse: res.data || res.error,
+        });
+
+        if (res.success) {
+          reminder.lastSentAt = new Date();
+          reminder.followUpSent = false;
+          reminder.dailyStatus = "sent";
+          reminder.replyText = undefined;
+          reminder.lastRepliedAt = undefined;
+
+          await reminder.save();
+
+          results.push({
+            id: reminder._id,
+            status: "sent_reminder",
+            phone: reminder.phone,
+          });
+        } else {
+          results.push({
+            id: reminder._id,
+            status: "failed_sending_reminder",
+            error: res.error,
+            phone: reminder.phone,
+          });
+        }
       } else {
         results.push({
           id: reminder._id,
-          status: "failed_sending_reminder",
-          error: res.error,
-          phone: reminder.phone,
+          status: "skipped",
+          reason: "time_not_reached",
+          reminderTime: reminder.reminderTime,
+          now: nowTimeStr,
         });
       }
-    } else {
+    } catch (err: any) {
+      console.error(`[Cron] Error processing reminder ${reminder._id}:`, err);
       results.push({
         id: reminder._id,
-        status: "skipped",
-        reason: "time_not_reached",
-        reminderTime: reminder.reminderTime,
-        now: nowTimeStr,
+        status: "error_processing_reminder",
+        error: err.message || err,
       });
     }
   }
