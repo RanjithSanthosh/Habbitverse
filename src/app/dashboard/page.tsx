@@ -13,10 +13,14 @@ interface Reminder {
     reminderTime: string;
     followUpMessage: string;
     followUpTime: string;
+
     isActive: boolean;
     dailyStatus: 'pending' | 'sent' | 'replied' | 'missed' | 'failed';
     replyText?: string;
+    lastSentAt?: string;
+    followUpSent?: boolean;
 }
+
 
 export default function Dashboard() {
     const [reminders, setReminders] = useState<Reminder[]>([]);
@@ -183,19 +187,42 @@ export default function Dashboard() {
                                 <span>{reminder.phone}</span>
                             </div>
 
+
                             <div className="mt-4 border-t border-gray-800 pt-4">
-                                <div className="mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wilder">Internal Status (Today)</div>
-                                <div className={clsx(
-                                    "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-sm font-medium",
-                                    reminder.dailyStatus === 'pending' && "bg-gray-800 text-gray-400",
-                                    reminder.dailyStatus === 'sent' && "bg-blue-900/30 text-blue-400",
-                                    reminder.dailyStatus === 'replied' && "bg-green-900/30 text-green-400",
-                                    reminder.dailyStatus === 'missed' && "bg-orange-900/30 text-orange-400",
-                                    reminder.dailyStatus === 'failed' && "bg-red-900/30 text-red-400",
-                                )}>
-                                    {reminder.dailyStatus === 'replied' ? <CheckCircle size={14} /> :
-                                        reminder.dailyStatus === 'missed' ? <AlertCircle size={14} /> : null}
-                                    <span className="capitalize">{reminder.dailyStatus}</span>
+                                <div className="flex justify-between items-center mb-2">
+                                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wilder">Internal Status (Today)</div>
+                                    {reminder.lastSentAt && (
+                                        <div className="text-xs text-gray-600" title="Last Sent">
+                                            {new Date(reminder.lastSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    <div className={clsx(
+                                        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-sm font-medium",
+                                        reminder.dailyStatus === 'pending' && "bg-gray-800 text-gray-400",
+                                        reminder.dailyStatus === 'sent' && "bg-blue-900/30 text-blue-400 border border-blue-900/50",
+                                        reminder.dailyStatus === 'replied' && "bg-green-900/30 text-green-400 border border-green-900/50",
+                                        reminder.dailyStatus === 'missed' && "bg-orange-900/30 text-orange-400 border border-orange-900/50",
+                                        reminder.dailyStatus === 'failed' && "bg-red-900/30 text-red-400 border border-red-900/50",
+                                    )}>
+                                        {reminder.dailyStatus === 'replied' ? <CheckCircle size={14} /> :
+                                            reminder.dailyStatus === 'missed' ? <AlertCircle size={14} /> :
+                                                reminder.dailyStatus === 'sent' ? <Clock size={14} /> : null}
+                                        <span className="capitalize">{reminder.dailyStatus}</span>
+                                    </div>
+
+                                    {/* Status Detail Badge */}
+                                    {reminder.dailyStatus === 'replied' && (
+                                        <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-400 ring-1 ring-inset ring-emerald-500/20">
+                                            Follow-up Stopped
+                                        </span>
+                                    )}
+                                    {reminder.dailyStatus === 'sent' && !reminder.followUpSent && (
+                                        <span className="inline-flex items-center rounded-full bg-blue-400/10 px-2 py-0.5 text-xs font-medium text-blue-400 ring-1 ring-inset ring-blue-400/20">
+                                            Waiting for Reply
+                                        </span>
+                                    )}
                                 </div>
                             </div>
 
