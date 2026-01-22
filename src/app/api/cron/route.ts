@@ -50,14 +50,17 @@ export async function GET(req: NextRequest) {
 
   for (const reminder of activeReminders) {
     // IDEMPOTENCY CHECK:
-    // If already sent TODAY, strictly skip.
     if (isTodayIST(reminder.lastSentAt)) {
+      results.push({
+        id: reminder._id,
+        status: "skipped",
+        reason: "already_sent_today",
+        lastSentAt: reminder.lastSentAt,
+      });
       continue;
     }
 
     // CATCH-UP LOGIC:
-    // If CurrentTime >= ReminderTime, it is due!
-    // String comparison works effectively for 24h format (e.g. "14:05" >= "14:00")
     if (nowTimeStr >= reminder.reminderTime) {
       // Send Message
       const res = await sendWhatsAppMessage(reminder.phone, reminder.message);
@@ -75,28 +78,38 @@ export async function GET(req: NextRequest) {
 
       if (res.success) {
         // Mark as Sent
-        reminder.lastSentAt = new Date(); // Stores UTC, but our helper compares efficiently
+        reminder.lastSentAt = new Date();
         reminder.followUpSent = false;
         reminder.dailyStatus = "sent";
         reminder.replyText = undefined;
         reminder.lastRepliedAt = undefined;
         await reminder.save();
 
-        results.push({ id: reminder._id, status: "sent_reminder" });
+        results.push({
+          id: reminder._id,
+          status: "sent_reminder",
+          phone: reminder.phone,
+        });
       } else {
         results.push({
           id: reminder._id,
           status: "failed_sending_reminder",
           error: res.error,
+          phone: reminder.phone,
         });
       }
+    } else {
+      results.push({
+        id: reminder._id,
+        status: "skipped",
+        reason: "time_not_reached",
+        reminderTime: reminder.reminderTime,
+        now: nowTimeStr,
+      });
     }
   }
 
   // --- 2. Process FOLLOW-UPS ---
-  // Fetch reminders that were sent today AND are awaiting reply
-  // We filter in-memory or rough database query.
-  // Optimization: find dailyStatus='sent' and isActive=true
   const activeFollowUps = await Reminder.find({
     isActive: true,
     dailyStatus: "sent",
@@ -104,18 +117,10 @@ export async function GET(req: NextRequest) {
   });
 
   for (const reminder of activeFollowUps) {
-    // Double check it was sent Today
     if (!isTodayIST(reminder.lastSentAt)) {
-      // If status is 'sent' but date is not today, it's stale (missed reply yesterday).
-      // We should reset or ignore. For now, ignore.
-      continue;
+      continue; // Stale
     }
 
-    // Check if IDEMPOTENT (already sent follow up? schema default is false, but safe to check)
-    if (reminder.followUpSent) continue;
-
-    // CHECK DUE TIME
-    // If CurrentTime >= FollowUpTime
     if (reminder.followUpTime && nowTimeStr >= reminder.followUpTime) {
       const res = await sendWhatsAppMessage(
         reminder.phone,
@@ -134,16 +139,33 @@ export async function GET(req: NextRequest) {
 
       if (res.success) {
         reminder.followUpSent = true;
-        reminder.dailyStatus = "missed"; // Waiting for reply now
+        reminder.dailyStatus = "missed";
         await reminder.save();
-        results.push({ id: reminder._id, status: "sent_followup" });
+        results.push({
+          id: reminder._id,
+          status: "sent_followup",
+          phone: reminder.phone,
+        });
+      } else {
+        results.push({
+          id: reminder._id,
+          status: "failed_followup",
+          error: res.error,
+        });
       }
+    } else {
+      results.push({
+        id: reminder._id,
+        status: "skipped_followup",
+        reason: "time_not_reached",
+      });
     }
   }
 
   return NextResponse.json({
     success: true,
-    processed: results,
-    time: nowTimeStr,
+    processedCount: results.length,
+    results: results,
+    serverTimeIST: nowTimeStr,
   });
 }
