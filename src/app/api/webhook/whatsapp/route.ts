@@ -59,47 +59,62 @@ export async function POST(req: NextRequest) {
         // For MVP we assume Admin enters exact WhatsApp ID format or we handle basic stripping.
         // We act on the *latest* active reminder sent today.
 
-        // Helper: Check valid window (sent today)
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
+        const rawBody = JSON.stringify(body, null, 2);
+        console.log("[Webhook] Received Body:", rawBody);
 
-        // Flexible phone matching strategy:
-        // WhatsApp API sends full format (e.g., 919876543210 or 15551234567)
-        // Admin might have saved as 9876543210 or +919876543210.
-        // We try to match the last 10 digits to be safe for India/USA common cases.
-        // For production "Strict" matching, we should enforce E.164 on input.
-        // Here we do a "best effort" match.
+        // NORMALIZE PHONES
+        // 1. Incoming: Strip non-digits
+        // Safe access because we are inside the 'if' block checking structure
+        const incomingDigits = from.replace(/\D/g, "");
+        const incomingLast10 = incomingDigits.slice(-10);
 
-        const last10Digits = from.slice(-10);
-
-        // Find reminders sent today where the phone ends with these digits
-        const reminders = await Reminder.find({
-          isActive: true,
-          lastSentAt: { $gte: startOfDay },
-        });
-
-        const reminder = reminders.find((r) =>
-          r.phone.replace(/\D/g, "").endsWith(last10Digits)
+        console.log(
+          `[Webhook] Processing Reply from: ${from} (Digits: ${incomingDigits}, Last10: ${incomingLast10})`
         );
 
-        if (reminder) {
+        // 2. Fetch ALL active reminders (optimization: could filter by date here, but let's do in memory for complex matching)
+        // We only care about reminders sent recently (e.g. last 24h) to avoid reviving old ones
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+
+        const potentialReminders = await Reminder.find({
+          isActive: true,
+          lastSentAt: { $gte: yesterday },
+        });
+
+        console.log(
+          `[Webhook] Found ${potentialReminders.length} potential active reminders since yesterday.`
+        );
+
+        // 3. Find Match
+        // We look for any reminder where the stored phone *ends with* the incoming last 10
+        // OR the incoming phone *ends with* the stored phone (if stored is short)
+        const matchedReminder = potentialReminders.find((r) => {
+          const dbDigits = r.phone.replace(/\D/g, "");
+          const isMatch =
+            dbDigits.endsWith(incomingLast10) ||
+            incomingDigits.endsWith(dbDigits);
+
+          if (isMatch) {
+            console.log(`   -> MATCH FOUND: ${r.title} (DB Phone: ${r.phone})`);
+          }
+          return isMatch;
+        });
+
+        if (matchedReminder) {
           console.log(
-            `[Webhook] Reply received for ${reminder.title} from ${from}: ${text}`
+            `[Webhook] UPDATE STATUS: ${matchedReminder._id} -> replied`
           );
 
-          reminder.dailyStatus = "replied";
-          reminder.replyText = text;
-          reminder.lastRepliedAt = new Date();
-          // IMPORTANT: If they replied, we should NOT send the follow-up
-          // The cron job checks for dailyStatus === 'sent' && followUpSent === false.
-          // By setting dailyStatus to 'replied', the cron loop will implicitly skip it.
-          // We can also explicitly force followUpSent to true to be double safe, or just rely on status.
-          // Let's rely on status 'replied' which is semantic.
+          matchedReminder.dailyStatus = "replied";
+          matchedReminder.replyText = text;
+          matchedReminder.lastRepliedAt = new Date();
 
-          await reminder.save();
+          await matchedReminder.save();
+          console.log(`[Webhook] Saved successfully.`);
         } else {
           console.log(
-            `[Webhook] No active reminder found for ${from} (Last 10: ${last10Digits})`
+            `[Webhook] NO MATCH found for ${from}. Verified ${potentialReminders.length} candidates.`
           );
         }
       }
