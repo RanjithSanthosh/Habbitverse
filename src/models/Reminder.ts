@@ -7,7 +7,7 @@ export interface IReminder {
   message: string;
   reminderTime: string; // HH:MM (24h)
   followUpMessage: string;
-  followUpDelay: number; // minutes
+  followUpTime: string; // HH:MM
   isActive: boolean;
 
   // Tracking state
@@ -28,7 +28,7 @@ const ReminderSchema = new Schema<IReminder>(
     message: { type: String, required: true },
     reminderTime: { type: String, required: true }, // Format: "14:30"
     followUpMessage: { type: String },
-    followUpDelay: { type: Number, default: 30 },
+    followUpTime: { type: String, required: true }, // Format: "15:00"
     isActive: { type: Boolean, default: true },
 
     lastSentAt: { type: Date },

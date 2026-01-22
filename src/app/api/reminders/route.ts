@@ -21,7 +21,13 @@ export async function POST(req: NextRequest) {
     await dbConnect();
 
     // Basic Validation
-    if (!body.phone || !body.title || !body.message || !body.reminderTime) {
+    if (
+      !body.phone ||
+      !body.title ||
+      !body.message ||
+      !body.reminderTime ||
+      !body.followUpTime
+    ) {
       return NextResponse.json(
         { error: "Missing required fields" },
         { status: 400 }

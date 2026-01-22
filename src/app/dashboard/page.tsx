@@ -12,7 +12,7 @@ interface Reminder {
     message: string;
     reminderTime: string;
     followUpMessage: string;
-    followUpDelay: number;
+    followUpTime: string;
     isActive: boolean;
     dailyStatus: 'pending' | 'sent' | 'replied' | 'missed' | 'failed';
     replyText?: string;
@@ -28,7 +28,7 @@ export default function Dashboard() {
         message: '',
         reminderTime: '08:00',
         followUpMessage: 'Did you complete your habit?',
-        followUpDelay: 30,
+        followUpTime: '09:00',
     });
     const [submitting, setSubmitting] = useState(false);
 
@@ -99,7 +99,7 @@ export default function Dashboard() {
                     message: '',
                     reminderTime: '08:00',
                     followUpMessage: 'Did you complete your habit?',
-                    followUpDelay: 30,
+                    followUpTime: '09:00',
                 });
                 fetchReminders();
             }
@@ -274,10 +274,10 @@ export default function Dashboard() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="mb-1 block text-sm font-medium text-gray-300">Delay (Min)</label>
-                                    <input type="number" required min={1}
+                                    <label className="mb-1 block text-sm font-medium text-gray-300">Follow-up Time</label>
+                                    <input type="time" required
                                         className="w-full rounded bg-gray-950 border border-gray-800 p-2 text-white focus:border-indigo-500 focus:outline-none"
-                                        value={formData.followUpDelay} onChange={e => setFormData({ ...formData, followUpDelay: Number(e.target.value) })}
+                                        value={formData.followUpTime} onChange={e => setFormData({ ...formData, followUpTime: e.target.value })}
                                     />
                                 </div>
                             </div>
