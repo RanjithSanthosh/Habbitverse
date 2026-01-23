@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/db";
 import Reminder from "@/models/Reminder";
+import ReminderExecution from "@/models/ReminderExecution";
 import MessageLog from "@/models/MessageLog";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
 
@@ -14,19 +15,11 @@ const getISTTime = () => {
   });
 };
 
-// Helper: Check if a date occurred Today (IST)
-const isTodayIST = (paramsDate?: Date) => {
-  if (!paramsDate) return false;
-
-  // Convert both to IST strings for date comparison YYYY-MM-DD
-  const istNow = new Date().toLocaleDateString("en-CA", {
-    timeZone: "Asia/Kolkata",
-  }); // YYYY-MM-DD
-  const istParam = new Date(paramsDate).toLocaleDateString("en-CA", {
+// Helper: Get Today's Date in IST (YYYY-MM-DD)
+const getISTDate = () => {
+  return new Date().toLocaleDateString("en-CA", {
     timeZone: "Asia/Kolkata",
   });
-
-  return istNow === istParam;
 };
 
 // Helper: Convert "HH:MM" to minutes from midnight
@@ -45,32 +38,43 @@ export async function GET(req: NextRequest) {
   await dbConnect();
 
   const nowTimeStr = getISTTime();
+  const todayDateStr = getISTDate();
   const nowMinutes = getMinutesFromMidnight(nowTimeStr);
 
-  console.log(`[Cron] Running at IST: ${nowTimeStr} (${nowMinutes}m)`);
+  console.log(
+    `[Cron] Running at IST: ${todayDateStr} ${nowTimeStr} (${nowMinutes}m)`
+  );
 
-  // --- 1. Process REMINDERS ---
-  const activeReminders = await Reminder.find({ isActive: true });
   const results = [];
+
+  // --- 1. Process REMINDERS (Send initial message) ---
+  // Get all active reminder configurations
+  const activeReminders = await Reminder.find({ isActive: true });
 
   for (const reminder of activeReminders) {
     try {
-      if (isTodayIST(reminder.lastSentAt)) {
-        results.push({
-          id: reminder._id,
-          status: "skipped",
-          reason: "already_sent_today",
-          lastSentAt: reminder.lastSentAt,
-        });
+      // Check if we already executed this reminder TODAY
+      const existingExecution = await ReminderExecution.findOne({
+        reminderId: reminder._id,
+        date: todayDateStr,
+      });
+
+      if (existingExecution) {
+        // Already processed for today
         continue;
       }
 
       const reminderMinutes = getMinutesFromMidnight(reminder.reminderTime);
 
-      // ROBUST CHECK: Integers instead of strings
+      // Check if it's time to send
       if (nowMinutes >= reminderMinutes) {
+        console.log(
+          `[Cron] Sending Initial Reminder: ${reminder.title} to ${reminder.phone}`
+        );
+
         const res = await sendWhatsAppMessage(reminder.phone, reminder.message);
 
+        // Log the attempt (raw log)
         await MessageLog.create({
           reminderId: reminder._id,
           phone: reminder.phone,
@@ -82,160 +86,138 @@ export async function GET(req: NextRequest) {
         });
 
         if (res.success) {
-          reminder.lastSentAt = new Date();
-          reminder.followUpSent = false;
-          reminder.dailyStatus = "sent";
-          reminder.replyText = undefined;
-          reminder.lastRepliedAt = undefined;
+          // Create the execution record
+          await ReminderExecution.create({
+            reminderId: reminder._id,
+            phone: reminder.phone,
+            date: todayDateStr,
+            status: "sent", // Initial status
+            sentAt: new Date(),
+            followUpStatus: "pending",
+          });
 
+          // Legacy support: Update the Reminder model too for now
+          reminder.lastSentAt = new Date();
+          reminder.dailyStatus = "sent";
           await reminder.save();
 
           results.push({
             id: reminder._id,
-            status: "sent_reminder",
+            type: "reminder",
+            status: "sent",
             phone: reminder.phone,
           });
         } else {
           results.push({
             id: reminder._id,
-            status: "failed_sending_reminder",
+            type: "reminder",
+            status: "failed",
             error: res.error,
-            phone: reminder.phone,
           });
         }
-      } else {
-        results.push({
-          id: reminder._id,
-          status: "skipped",
-          reason: "time_not_reached",
-          reminderTime: reminder.reminderTime,
-          now: nowTimeStr,
-        });
       }
     } catch (err: any) {
       console.error(`[Cron] Error processing reminder ${reminder._id}:`, err);
       results.push({
         id: reminder._id,
-        status: "error_processing_reminder",
-        error: err.message || err,
+        type: "reminder",
+        status: "error",
+        error: err.message,
       });
     }
   }
 
   // --- 2. Process FOLLOW-UPS ---
-  // Queries only reminders that are ALREADY 'sent' today.
-  const activeFollowUps = await Reminder.find({
-    isActive: true,
-    dailyStatus: "sent",
-    followUpSent: false,
-  });
+  // Iterate through TODAY'S executions that are still pending follow-up
+  // AND where the user has NOT replied yet.
+  const pendingFollowUps = await ReminderExecution.find({
+    date: todayDateStr,
+    status: "sent", // Means NO reply received yet (otherwise it would be 'replied')
+    followUpStatus: "pending",
+  }).populate("reminderId"); // We need the config to get followUpTime and message
 
-  if (activeFollowUps.length > 0) {
+  if (pendingFollowUps.length > 0) {
     console.log(
-      `[Cron] Found ${activeFollowUps.length} candidates for follow-up.`
+      `[Cron] Found ${pendingFollowUps.length} candidates for follow-up.`
     );
   }
 
-  for (const reminder of activeFollowUps) {
+  for (const execution of pendingFollowUps) {
     try {
-      if (!isTodayIST(reminder.lastSentAt)) {
-        continue; // Stale data from yesterday
+      const config = execution.reminderId as any; // Type assertion since populated
+
+      if (!config || !config.isActive) {
+        continue; // Config deleted or disabled
       }
 
-      if (!reminder.followUpTime) {
-        results.push({
-          id: reminder._id,
-          status: "skipped_followup",
-          reason: "no_followup_time_set",
-        });
+      if (!config.followUpTime) {
+        // No follow-up configured, mark skipped
+        execution.followUpStatus = "skipped";
+        await execution.save();
         continue;
       }
 
-      const followUpMinutes = getMinutesFromMidnight(reminder.followUpTime);
+      const followUpMinutes = getMinutesFromMidnight(config.followUpTime);
 
+      // Check if follow-up time is reached
       if (nowMinutes >= followUpMinutes) {
-        // 🚨 CRITICAL: RE-FETCH from DB to ensure 'replied' is still false
-        // This prevents race conditions where user replied 1 second ago
-        const FRESH_REMINDER = await Reminder.findById(reminder._id);
-
-        if (!FRESH_REMINDER) continue; // Deleted?
-
-        // If user has REPLIED, we MUST NOT send the follow-up
-        if (
-          FRESH_REMINDER.dailyStatus === "replied" ||
-          FRESH_REMINDER.dailyStatus === "missed"
-        ) {
-          results.push({
-            id: reminder._id,
-            status: "cancelled_followup",
-            reason: "user_already_replied_or_handled",
-            currentStatus: FRESH_REMINDER.dailyStatus,
-          });
-          continue;
-        }
-
-        // Also check idempotency again on fresh object
-        if (FRESH_REMINDER.followUpSent) {
-          continue;
-        }
-
-        // EXTRA SAFETY: Ensure follow-up time is actually AFTER reminder time
-        const reminderMinutes = getMinutesFromMidnight(reminder.reminderTime);
+        // Double check strict timing (Safety)
+        const reminderMinutes = getMinutesFromMidnight(config.reminderTime);
         if (followUpMinutes <= reminderMinutes) {
-          results.push({
-            id: reminder._id,
-            status: "skipped_followup",
-            reason: "config_error_followup_too_early",
-            warning: "Follow-up time must be AFTER reminder time",
-          });
+          console.warn(
+            `[Cron] Config Error: Follow-up time ${config.followUpTime} is <= Reminder time ${config.reminderTime}`
+          );
           continue;
         }
+
+        console.log(
+          `[Cron] Sending Follow-up: ${config.title} to ${execution.phone}`
+        );
 
         const res = await sendWhatsAppMessage(
-          reminder.phone,
-          reminder.followUpMessage || "Did you complete your habit?"
+          execution.phone,
+          config.followUpMessage || "Did you complete your habit?"
         );
 
         await MessageLog.create({
-          reminderId: reminder._id,
-          phone: reminder.phone,
+          reminderId: config._id,
+          phone: execution.phone,
           direction: "outbound",
           messageType: "followup",
-          content: reminder.followUpMessage,
+          content: config.followUpMessage,
           status: res.success ? "sent" : "failed",
           rawResponse: res.data || res.error,
         });
 
         if (res.success) {
-          reminder.followUpSent = true;
-          reminder.dailyStatus = "missed";
-          await reminder.save();
+          execution.followUpStatus = "sent";
+          execution.followUpSentAt = new Date();
+          await execution.save();
+
           results.push({
-            id: reminder._id,
-            status: "sent_followup",
-            phone: reminder.phone,
+            id: execution._id,
+            type: "followup",
+            status: "sent",
+            phone: execution.phone,
           });
         } else {
           results.push({
-            id: reminder._id,
-            status: "failed_followup",
+            id: execution._id,
+            type: "followup",
+            status: "failed",
             error: res.error,
           });
         }
-      } else {
-        results.push({
-          id: reminder._id,
-          status: "skipped_followup",
-          reason: "time_not_reached",
-          followUpTime: reminder.followUpTime,
-          now: nowTimeStr,
-        });
       }
     } catch (err: any) {
-      console.error(`[Cron] Error processing follow-up ${reminder._id}:`, err);
+      console.error(
+        `[Cron] Error processing follow-up execution ${execution._id}:`,
+        err
+      );
       results.push({
-        id: reminder._id,
-        status: "error_processing_followup",
+        id: execution._id,
+        type: "followup",
+        status: "error",
         error: err.message,
       });
     }
@@ -245,6 +227,6 @@ export async function GET(req: NextRequest) {
     success: true,
     processedCount: results.length,
     results: results,
-    serverTimeIST: nowTimeStr,
+    serverTimeIST: `${todayDateStr} ${nowTimeStr}`,
   });
 }

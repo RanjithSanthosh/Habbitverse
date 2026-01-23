@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/db";
 import Reminder from "@/models/Reminder";
+import ReminderExecution from "@/models/ReminderExecution";
 import MessageLog from "@/models/MessageLog";
+
+// Helper: Get Today's Date in IST (YYYY-MM-DD)
+const getISTDate = () => {
+  return new Date().toLocaleDateString("en-CA", {
+    timeZone: "Asia/Kolkata",
+  });
+};
 
 // GET request for Webhook Verification
 export async function GET(req: NextRequest) {
@@ -52,19 +60,11 @@ export async function POST(req: NextRequest) {
           rawResponse: body,
         });
 
-        // Find the matching reminder
-        // We look for a reminder with this phone number that was sent today
-        // We assume phone number format matches (e.g. strict string match)
-        // Note: WhatsApp numbers usually have country code without +. User input might vary.
-        // For MVP we assume Admin enters exact WhatsApp ID format or we handle basic stripping.
-        // We act on the *latest* active reminder sent today.
-
         const rawBody = JSON.stringify(body, null, 2);
-        console.log("[Webhook] Received Body:", rawBody);
+        // console.log("[Webhook] Received Body:", rawBody);
 
         // NORMALIZE PHONES
         // 1. Incoming: Strip non-digits
-        // Safe access because we are inside the 'if' block checking structure
         const incomingDigits = from.replace(/\D/g, "");
         const incomingLast10 = incomingDigits.slice(-10);
 
@@ -72,49 +72,60 @@ export async function POST(req: NextRequest) {
           `[Webhook] Processing Reply from: ${from} (Digits: ${incomingDigits}, Last10: ${incomingLast10})`
         );
 
-        // 2. Fetch ALL active reminders (optimization: could filter by date here, but let's do in memory for complex matching)
-        // We only care about reminders sent recently (e.g. last 24h) to avoid reviving old ones
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
+        // 2. Find Active Executions for TODAY
+        const todayStr = getISTDate();
 
-        const potentialReminders = await Reminder.find({
-          isActive: true,
-          lastSentAt: { $gte: yesterday },
-        });
+        // We look for executions that are 'sent' (waiting for reply)
+        // Optimization: Regex match on phone could work, but let's fetch all 'sent' today and filter in JS for robustness
+        const pendingExecutions = await ReminderExecution.find({
+          date: todayStr,
+          status: "sent",
+        }).sort({ sentAt: -1 }); // Newest first
 
         console.log(
-          `[Webhook] Found ${potentialReminders.length} potential active reminders since yesterday.`
+          `[Webhook] Found ${pendingExecutions.length} pending executions for today (${todayStr}).`
         );
 
-        // 3. Find Match
-        // We look for any reminder where the stored phone *ends with* the incoming last 10
-        // OR the incoming phone *ends with* the stored phone (if stored is short)
-        const matchedReminder = potentialReminders.find((r) => {
-          const dbDigits = r.phone.replace(/\D/g, "");
+        // 3. Find Match using Last 10 Digits logic
+        const matchedExecution = pendingExecutions.find((exec) => {
+          const dbDigits = exec.phone.replace(/\D/g, "");
           const isMatch =
             dbDigits.endsWith(incomingLast10) ||
             incomingDigits.endsWith(dbDigits);
 
           if (isMatch) {
-            console.log(`   -> MATCH FOUND: ${r.title} (DB Phone: ${r.phone})`);
+            console.log(`   -> MATCH FOUND: Execution ID ${exec._id}`);
           }
           return isMatch;
         });
 
-        if (matchedReminder) {
+        if (matchedExecution) {
           console.log(
-            `[Webhook] UPDATE STATUS: ${matchedReminder._id} -> replied`
+            `[Webhook] UPDATE STATUS: ${matchedExecution._id} -> replied`
           );
 
-          matchedReminder.dailyStatus = "replied";
-          matchedReminder.replyText = text;
-          matchedReminder.lastRepliedAt = new Date();
+          matchedExecution.status = "replied";
+          matchedExecution.replyReceivedAt = new Date();
 
-          await matchedReminder.save();
+          await matchedExecution.save();
+
+          // --- LEGACY / SYNC SUPPORT ---
+          // Also update the main Reminder document to reflect the latest status
+          // This ensures the UI or other parts of the system see "replied"
+          try {
+            await Reminder.findByIdAndUpdate(matchedExecution.reminderId, {
+              dailyStatus: "replied",
+              replyText: text,
+              lastRepliedAt: new Date(),
+            });
+          } catch (err) {
+            console.error("Error updating legacy Reminder doc", err);
+          }
+
           console.log(`[Webhook] Saved successfully.`);
         } else {
           console.log(
-            `[Webhook] NO MATCH found for ${from}. Verified ${potentialReminders.length} candidates.`
+            `[Webhook] NO MATCH found for ${from}. Verified ${pendingExecutions.length} candidates.`
           );
         }
       }
