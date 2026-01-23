@@ -106,6 +106,12 @@ export async function POST(req: NextRequest) {
 
           matchedExecution.status = "replied";
           matchedExecution.replyReceivedAt = new Date();
+
+          // Explicitly mark follow-up as cancelled if it wasn't sent yet
+          if (matchedExecution.followUpStatus === "pending") {
+            matchedExecution.followUpStatus = "replied_before_followup";
+          }
+
           await matchedExecution.save();
 
           // --- LEGACY / SYNC SUPPORT ---
@@ -119,14 +125,8 @@ export async function POST(req: NextRequest) {
             console.error("Error updating legacy Reminder doc", err);
           }
 
-          // --- AUTO-REPLY LOGIC ---
-          if (isButtonReply && text === "completed_habit") {
-            console.log("[Webhook] Sending Congratulations Message...");
-            await sendWhatsAppMessage(
-              from,
-              "Congratulations! 🎉 Keep up the great streak!"
-            );
-          }
+          // [REMOVED] Auto-reply logic to prevent sending extra messages to the user.
+          // verified that switching 'status' to 'replied' stops the cron job from sending follow-ups.
 
           console.log(`[Webhook] Saved successfully.`);
         } else {
