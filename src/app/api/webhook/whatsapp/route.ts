@@ -88,15 +88,17 @@ export async function POST(req: NextRequest) {
 
         // 3. Find Match using Last 10 Digits logic
         const matchedExecution = pendingExecutions.find((exec) => {
+          // Normalize DB phone: remove non-digits
           const dbDigits = exec.phone.replace(/\D/g, "");
-          const isMatch =
-            dbDigits.endsWith(incomingLast10) ||
-            incomingDigits.endsWith(dbDigits);
 
-          if (isMatch) {
-            console.log(`   -> MATCH FOUND: Execution ID ${exec._id}`);
+          // Safety: If either is too short, do strict equality check
+          if (incomingDigits.length < 10 || dbDigits.length < 10) {
+            return incomingDigits === dbDigits;
           }
-          return isMatch;
+
+          // Otherwise use 10-digit suffix matching (robust for +91 vs 91 vs 0)
+          const dbLast10 = dbDigits.slice(-10);
+          return dbLast10 === incomingLast10;
         });
 
         if (matchedExecution) {
