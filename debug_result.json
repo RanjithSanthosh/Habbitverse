@@ -1,20 +1,119 @@
 {
-  "logs": [],
-  "notifications": [
+  "meta": {
+    "nowTimeStr": "22:20",
+    "todayDateStr": "2026-01-23",
+    "nowMinutes": 1340
+  },
+  "executions": [
     {
-      "_id": "696bb8b5dd4650c2be0f6d4a",
+      "id": "697392b2c3e91fc4504bac58",
+      "reminderId": "697392b1c3e91fc4504bac56",
+      "status": "replied",
+      "phone": "919999999999",
+      "sentAt": "2026-01-23T15:24:34.758Z",
+      "followUpStatus": "pending"
+    },
+    {
+      "id": "6973952fef10c3c0a23ffb09",
+      "reminderId": "697394eeef10c3c0a23ffaf4",
+      "status": "sent",
       "phone": "916369879920",
-      "title": "sleep",
-      "message": "go to sleep",
-      "reminderTime": "22:00",
-      "followUpMessage": "Did you complete your habit?",
-      "followUpDelay": 1,
-      "isActive": true,
-      "followUpSent": false,
-      "dailyStatus": "pending",
-      "createdAt": "2026-01-17T16:28:37.491Z",
-      "updatedAt": "2026-01-17T16:28:37.491Z",
-      "__v": 0
+      "sentAt": "2026-01-23T15:35:11.628Z",
+      "followUpStatus": "sent"
     }
-  ]
+  ],
+  "recentLogs": [
+    {
+      "id": "6973a6c614de895d83fb0cdb",
+      "phone": "916369879920",
+      "type": "reminder",
+      "status": "failed",
+      "createdAt": "2026-01-23T16:50:14.230Z",
+      "error": {
+        "error": {
+          "message": "Error validating access token: Session has expired on Friday, 23-Jan-26 08:00:00 PST. The current time is Friday, 23-Jan-26 08:50:14 PST.",
+          "type": "OAuthException",
+          "code": 190,
+          "error_subcode": 463,
+          "fbtrace_id": "AvE-FPFnBEtO83r6q1Sr9G-"
+        }
+      }
+    },
+    {
+      "id": "6973a68114de895d83fb0cd4",
+      "phone": "916369879920",
+      "type": "reminder",
+      "status": "failed",
+      "createdAt": "2026-01-23T16:49:05.449Z",
+      "error": {
+        "error": {
+          "message": "Error validating access token: Session has expired on Friday, 23-Jan-26 08:00:00 PST. The current time is Friday, 23-Jan-26 08:49:05 PST.",
+          "type": "OAuthException",
+          "code": 190,
+          "error_subcode": 463,
+          "fbtrace_id": "ARfGfhU1nTH1a9R-Jaanzqs"
+        }
+      }
+    },
+    {
+      "id": "6973a64714de895d83fb0ccd",
+      "phone": "916369879920",
+      "type": "reminder",
+      "status": "failed",
+      "createdAt": "2026-01-23T16:48:07.667Z",
+      "error": {
+        "error": {
+          "message": "Error validating access token: Session has expired on Friday, 23-Jan-26 08:00:00 PST. The current time is Friday, 23-Jan-26 08:48:07 PST.",
+          "type": "OAuthException",
+          "code": 190,
+          "error_subcode": 463,
+          "fbtrace_id": "AK524_i_YgRo1bol7p4GInO"
+        }
+      }
+    },
+    {
+      "id": "6973a60914de895d83fb0cc6",
+      "phone": "916369879920",
+      "type": "reminder",
+      "status": "failed",
+      "createdAt": "2026-01-23T16:47:05.214Z",
+      "error": {
+        "error": {
+          "message": "Error validating access token: Session has expired on Friday, 23-Jan-26 08:00:00 PST. The current time is Friday, 23-Jan-26 08:47:05 PST.",
+          "type": "OAuthException",
+          "code": 190,
+          "error_subcode": 463,
+          "fbtrace_id": "A_sxVCff7CkhHpPdqbN8qVP"
+        }
+      }
+    },
+    {
+      "id": "6973a5cf14de895d83fb0cbf",
+      "phone": "916369879920",
+      "type": "reminder",
+      "status": "failed",
+      "createdAt": "2026-01-23T16:46:07.363Z",
+      "error": {
+        "error": {
+          "message": "Error validating access token: Session has expired on Friday, 23-Jan-26 08:00:00 PST. The current time is Friday, 23-Jan-26 08:46:07 PST.",
+          "type": "OAuthException",
+          "code": 190,
+          "error_subcode": 463,
+          "fbtrace_id": "A2rbyAd2NFtUYl9r8ZlXRm7"
+        }
+      }
+    }
+  ],
+  "remindersCheck": [
+    {
+      "id": "6973a23614de895d83fb0c52",
+      "title": "slp",
+      "phone": "916369879920",
+      "reminderTime": "22:02",
+      "reminderMinutes": 1322,
+      "nowMinutes": 1340,
+      "result": "SEND - Condition Met"
+    }
+  ],
+  "followUps": []
 }

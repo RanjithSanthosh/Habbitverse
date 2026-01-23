@@ -1,8 +1,14 @@
 const WHATSAPP_API_URL = "https://graph.facebook.com/v21.0"; // Use a recent version
 
+interface WhatsAppButton {
+  id: string;
+  title: string;
+}
+
 export async function sendWhatsAppMessage(
   to: string,
-  body: string
+  body: string,
+  buttons?: WhatsAppButton[]
 ): Promise<{ success: boolean; data?: any; error?: any }> {
   try {
     const fromId = process.env.WHATSAPP_PHONE_NUMBER_ID;
@@ -15,18 +21,34 @@ export async function sendWhatsAppMessage(
 
     const url = `${WHATSAPP_API_URL}/${fromId}/messages`;
 
-    // NOTE: For business-initiated messages to new users, you MUST use templates.
-    // This implementation sends text messages, which works for replies (24h window)
-    // or if the implementation uses a "template" structure in the body logic.
-    // Given the prompt asks for "Reminder message" input, we'll try text first.
-    // If you need template, the payload structure changes.
-
-    const payload = {
+    let payload: any = {
       messaging_product: "whatsapp",
       to: to,
-      type: "text",
-      text: { body: body },
     };
+
+    if (buttons && buttons.length > 0) {
+      // Interactive Message Payload
+      payload.type = "interactive";
+      payload.interactive = {
+        type: "button",
+        body: {
+          text: body,
+        },
+        action: {
+          buttons: buttons.map((btn) => ({
+            type: "reply",
+            reply: {
+              id: btn.id,
+              title: btn.title,
+            },
+          })),
+        },
+      };
+    } else {
+      // Standard Text Message
+      payload.type = "text";
+      payload.text = { body: body };
+    }
 
     const response = await fetch(url, {
       method: "POST",

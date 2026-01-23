@@ -46,7 +46,17 @@ export async function POST(req: NextRequest) {
       ) {
         const message = body.entry[0].changes[0].value.messages[0];
         const from = message.from; // Phone number
-        const text = message.text ? message.text.body : "";
+
+        let text = "";
+        if (message.type === "text") {
+          text = message.text.body;
+        } else if (message.type === "interactive") {
+          const interactive = message.interactive;
+          if (interactive.type === "button_reply") {
+            text = interactive.button_reply.id; // Use ID as the "text" content for logic
+            // e.g. "completed_habit"
+          }
+        }
 
         await dbConnect();
 

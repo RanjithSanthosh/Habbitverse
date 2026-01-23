@@ -72,7 +72,11 @@ export async function GET(req: NextRequest) {
           `[Cron] Sending Initial Reminder: ${reminder.title} to ${reminder.phone}`
         );
 
-        const res = await sendWhatsAppMessage(reminder.phone, reminder.message);
+        const res = await sendWhatsAppMessage(
+          reminder.phone,
+          reminder.message,
+          [{ id: "completed_habit", title: "Completed" }]
+        );
 
         // Log the attempt (raw log)
         await MessageLog.create({
