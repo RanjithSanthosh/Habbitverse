@@ -16,7 +16,10 @@ export async function PUT(
     const body = await req.json();
     await dbConnect();
 
-    const reminder = await Reminder.findByIdAndUpdate(id, body, { new: true });
+    const reminder = await Reminder.findByIdAndUpdate(id, body, {
+      new: true,
+      runValidators: true,
+    });
     return NextResponse.json(reminder);
   } catch (error) {
     return NextResponse.json(

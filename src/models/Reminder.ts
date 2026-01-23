@@ -13,7 +13,13 @@ export interface IReminder {
   // Tracking state
   lastSentAt?: Date;
   followUpSent: boolean;
-  dailyStatus: "pending" | "sent" | "replied" | "missed" | "failed";
+  dailyStatus:
+    | "pending"
+    | "sent"
+    | "replied"
+    | "missed"
+    | "failed"
+    | "completed";
   replyText?: string;
   lastRepliedAt?: Date;
 
@@ -36,7 +42,7 @@ const ReminderSchema = new Schema<IReminder>(
     followUpSent: { type: Boolean, default: false },
     dailyStatus: {
       type: String,
-      enum: ["pending", "sent", "replied", "missed", "failed"],
+      enum: ["pending", "sent", "replied", "missed", "failed", "completed"],
       default: "pending",
     },
     replyText: { type: String },

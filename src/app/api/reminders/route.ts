@@ -15,51 +15,65 @@ export async function GET(req: NextRequest) {
   const auth = await verifyAuth(req);
   if (!auth) return unauthorized();
 
-  await dbConnect();
+  try {
+    await dbConnect();
 
-  // 1. Fetch all configurations
-  const reminders = await Reminder.find().sort({ createdAt: -1 });
+    // 1. Fetch all configurations
+    const reminders = await Reminder.find().sort({ createdAt: -1 });
 
-  // 2. Fetch today's executions
-  const todayStr = getISTDate();
-  const todaysExecutions = await ReminderExecution.find({ date: todayStr });
+    // 2. Fetch today's executions
+    const todayStr = getISTDate();
+    const todaysExecutions = await ReminderExecution.find({ date: todayStr });
 
-  // 3. Map executions to a lookup object by reminderId
-  const executionMap: Record<string, any> = {};
-  todaysExecutions.forEach((exec) => {
-    executionMap[exec.reminderId.toString()] = exec;
-  });
+    // 3. Map executions to a lookup object by reminderId
+    const executionMap: Record<string, any> = {};
+    todaysExecutions.forEach((exec) => {
+      executionMap[exec.reminderId.toString()] = exec;
+    });
 
-  // 4. Merge Data for UI
-  const mergedData = reminders.map((r) => {
-    const exec = executionMap[r._id.toString()];
-    const doc = r.toObject();
+    // 4. Merge Data for UI
+    const mergedData = reminders.map((r) => {
+      const exec = executionMap[r._id.toString()];
+      const doc = r.toObject();
 
-      const isCompleted = r.replyText === "completed_habit" || r.replyText === "Completed";
-      
-      doc.dailyStatus =
-        exec.status === "replied"
-          ? (isCompleted ? "completed" : "replied")
-          : exec.status === "sent" && exec.followUpStatus === "sent"
-          ? "missed"
-          : exec.status === "sent"
-          ? "sent"
-          : "failed";
+      if (exec) {
+        const isCompleted =
+          r.replyText === "completed_habit" || r.replyText === "Completed";
 
-       if (isCompleted) {
-           doc.replyText = "Marked as Completed via Button";
-       }
-    } else {
-      // No execution today -> It's Pending or Skipped
-      doc.dailyStatus = "pending";
-      doc.lastSentAt = undefined; // Don't show yesterday's time as today's
-      doc.followUpSent = false;
-      doc.replyText = undefined;
-    }
-    return doc;
-  });
+        doc.dailyStatus =
+          exec.status === "replied"
+            ? isCompleted
+              ? "completed"
+              : "replied"
+            : exec.status === "sent" && exec.followUpStatus === "sent"
+            ? "missed"
+            : exec.status === "sent"
+            ? "sent"
+            : "failed";
 
-  return NextResponse.json(mergedData);
+        doc.lastSentAt = exec.sentAt;
+        doc.followUpSent = exec.followUpStatus === "sent";
+
+        if (isCompleted) {
+          doc.replyText = "Marked as Completed via Button";
+        }
+      } else {
+        // No execution today -> It's Pending or Skipped
+        doc.dailyStatus = "pending";
+        doc.lastSentAt = undefined;
+        doc.followUpSent = false;
+        doc.replyText = undefined;
+      }
+      return doc;
+    });
+
+    return NextResponse.json(mergedData);
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Failed to fetch reminders" },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: NextRequest) {
