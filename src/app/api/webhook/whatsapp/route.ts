@@ -3,6 +3,7 @@ import dbConnect from "@/lib/db";
 import Reminder from "@/models/Reminder";
 import ReminderExecution from "@/models/ReminderExecution";
 import MessageLog from "@/models/MessageLog";
+import { sendWhatsAppMessage } from "@/lib/whatsapp";
 
 // Helper: Get Today's Date in IST (YYYY-MM-DD)
 const getISTDate = () => {
@@ -48,13 +49,15 @@ export async function POST(req: NextRequest) {
         const from = message.from; // Phone number
 
         let text = "";
+        let isButtonReply = false;
+
         if (message.type === "text") {
           text = message.text.body;
         } else if (message.type === "interactive") {
           const interactive = message.interactive;
           if (interactive.type === "button_reply") {
-            text = interactive.button_reply.id; // Use ID as the "text" content for logic
-            // e.g. "completed_habit"
+            text = interactive.button_reply.id; // e.g. "completed_habit"
+            isButtonReply = true;
           }
         }
 
@@ -70,43 +73,28 @@ export async function POST(req: NextRequest) {
           rawResponse: body,
         });
 
-        const rawBody = JSON.stringify(body, null, 2);
-        // console.log("[Webhook] Received Body:", rawBody);
-
         // NORMALIZE PHONES
-        // 1. Incoming: Strip non-digits
         const incomingDigits = from.replace(/\D/g, "");
         const incomingLast10 = incomingDigits.slice(-10);
 
-        console.log(
-          `[Webhook] Processing Reply from: ${from} (Digits: ${incomingDigits}, Last10: ${incomingLast10})`
-        );
+        console.log(`[Webhook] Processing Reply from: ${from} (Text: ${text})`);
 
         // 2. Find Active Executions for TODAY
         const todayStr = getISTDate();
 
-        // We look for executions that are 'sent' (waiting for reply)
-        // Optimization: Regex match on phone could work, but let's fetch all 'sent' today and filter in JS for robustness
         const pendingExecutions = await ReminderExecution.find({
           date: todayStr,
           status: "sent",
         }).sort({ sentAt: -1 }); // Newest first
 
-        console.log(
-          `[Webhook] Found ${pendingExecutions.length} pending executions for today (${todayStr}).`
-        );
-
         // 3. Find Match using Last 10 Digits logic
         const matchedExecution = pendingExecutions.find((exec) => {
-          // Normalize DB phone: remove non-digits
           const dbDigits = exec.phone.replace(/\D/g, "");
 
-          // Safety: If either is too short, do strict equality check
           if (incomingDigits.length < 10 || dbDigits.length < 10) {
             return incomingDigits === dbDigits;
           }
 
-          // Otherwise use 10-digit suffix matching (robust for +91 vs 91 vs 0)
           const dbLast10 = dbDigits.slice(-10);
           return dbLast10 === incomingLast10;
         });
@@ -118,20 +106,26 @@ export async function POST(req: NextRequest) {
 
           matchedExecution.status = "replied";
           matchedExecution.replyReceivedAt = new Date();
-
           await matchedExecution.save();
 
           // --- LEGACY / SYNC SUPPORT ---
-          // Also update the main Reminder document to reflect the latest status
-          // This ensures the UI or other parts of the system see "replied"
           try {
             await Reminder.findByIdAndUpdate(matchedExecution.reminderId, {
               dailyStatus: "replied",
-              replyText: text,
+              replyText: text, // "completed_habit" or user text
               lastRepliedAt: new Date(),
             });
           } catch (err) {
             console.error("Error updating legacy Reminder doc", err);
+          }
+
+          // --- AUTO-REPLY LOGIC ---
+          if (isButtonReply && text === "completed_habit") {
+            console.log("[Webhook] Sending Congratulations Message...");
+            await sendWhatsAppMessage(
+              from,
+              "Congratulations! 🎉 Keep up the great streak!"
+            );
           }
 
           console.log(`[Webhook] Saved successfully.`);
