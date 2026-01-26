@@ -123,6 +123,21 @@ export async function POST(req: NextRequest) {
 
           await matchedExecution.save();
 
+          // --- AUTO-CONFIRMATION MESSAGE ---
+          // User requested: "auto completed message will be reseved to us"
+          if (newStatus === "completed") {
+            try {
+              await import("@/lib/whatsapp").then((mod) =>
+                mod.sendWhatsAppMessage(
+                  from,
+                  "Great job! ✅ Response recorded."
+                )
+              );
+            } catch (e) {
+              console.error("Failed to send auto-reply confirmation", e);
+            }
+          }
+
           // --- LEGACY SYNC (Optional but good for fallback) ---
           try {
             await Reminder.findByIdAndUpdate(matchedExecution.reminderId, {

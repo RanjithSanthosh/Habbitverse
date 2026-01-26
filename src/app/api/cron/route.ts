@@ -161,6 +161,69 @@ export async function GET(req: NextRequest) {
         continue; // Config deleted or disabled
       }
 
+      // -----------------------------------------------------------------------
+      // FAILSAFE: Check Message Logs for missed replies
+      // The user wants the Cron to explicitly check if a reply was received
+      // -----------------------------------------------------------------------
+      const lastSentTime = execution.sentAt;
+      if (lastSentTime) {
+        // Normalize phone for log search (remove non-digits)
+        const execPhoneDigits = execution.phone.replace(/\D/g, "");
+
+        // Find any INBOUND message from this number created AFTER the reminder was sent
+        // We need to match loose phone numbers, so we might need a regex or simply check matches in memory if volume is low.
+        // For efficiency, let's look for logs created > lastSentTime
+
+        const recentLogs = await MessageLog.find({
+          direction: "inbound",
+          createdAt: { $gt: lastSentTime },
+        });
+
+        // Filter in memory for phone match (robust)
+        const matchedLog = recentLogs.find((log) => {
+          const logPhoneDigits = log.phone.replace(/\D/g, "");
+          return (
+            logPhoneDigits.includes(execPhoneDigits.slice(-10)) ||
+            execPhoneDigits.includes(logPhoneDigits.slice(-10))
+          );
+        });
+
+        if (matchedLog) {
+          const lowerContent = (matchedLog.content || "").toLowerCase();
+          if (
+            lowerContent.includes("complete") ||
+            lowerContent === "completed_habit" ||
+            lowerContent.includes("done")
+          ) {
+            console.log(
+              `[Cron] Failsafe: Found completion reply in logs for ${execution.phone}. Aborting follow-up.`
+            );
+
+            // Self-heal
+            execution.status = "completed";
+            execution.followUpStatus = "cancelled_by_user";
+            execution.replyReceivedAt = matchedLog.createdAt;
+            await execution.save();
+            continue; // SKIP
+          } else {
+            // They replied something else, maybe "Not yet"
+            // Technically this is still a "Reply", so we should record it and maybe skip?
+            // Requirement: "when i click completed button" -> specific check.
+            // But general reply usually stops follow-up too.
+            console.log(
+              `[Cron] Failsafe: Found generic reply in logs for ${execution.phone}. Aborting follow-up.`
+            );
+
+            execution.status = "replied";
+            execution.followUpStatus = "cancelled_by_user";
+            execution.replyReceivedAt = matchedLog.createdAt;
+            await execution.save();
+            continue; // SKIP
+          }
+        }
+      }
+      // -----------------------------------------------------------------------
+
       if (!config.followUpTime) {
         // No follow-up configured, mark skipped
         execution.followUpStatus = "skipped";
