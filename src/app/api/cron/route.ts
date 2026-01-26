@@ -146,9 +146,32 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  for (const execution of pendingFollowUps) {
+  for (const executionItem of pendingFollowUps) {
     try {
-      const config = execution.reminderId as any; // Type assertion since populated
+      // CRITICAL: Re-fetch the execution to ensure we have the LATEST status.
+      // The user might have replied milliseconds ago, or while the loop was running.
+      const execution = await ReminderExecution.findById(
+        executionItem._id
+      ).populate("reminderId");
+
+      if (!execution) continue; // Should not happen
+
+      // strict status check
+      if (execution.status === "completed" || execution.status === "replied") {
+        console.log(
+          `[Cron] Skipping follow-up for ${execution._id}: User already replied/completed.`
+        );
+        continue;
+      }
+
+      if (execution.followUpStatus !== "pending") {
+        console.log(
+          `[Cron] Skipping follow-up for ${execution._id}: Status is ${execution.followUpStatus}`
+        );
+        continue;
+      }
+
+      const config = execution.reminderId as any; // Type assertion
 
       if (!config || !config.isActive) {
         continue; // Config deleted or disabled
@@ -215,11 +238,11 @@ export async function GET(req: NextRequest) {
       }
     } catch (err: any) {
       console.error(
-        `[Cron] Error processing follow-up execution ${execution._id}:`,
+        `[Cron] Error processing follow-up execution ${executionItem._id}:`,
         err
       );
       results.push({
-        id: execution._id,
+        id: executionItem._id,
         type: "followup",
         status: "error",
         error: err.message,

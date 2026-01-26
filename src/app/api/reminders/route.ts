@@ -37,25 +37,31 @@ export async function GET(req: NextRequest) {
       const doc = r.toObject();
 
       if (exec) {
-        const isCompleted =
-          r.replyText === "completed_habit" || r.replyText === "Completed";
+        // Source of Truth: The Execution Record
+        // If execution status is explicitly 'completed', use it.
+        // Otherwise fallback to 'replied' if status is replied.
 
-        doc.dailyStatus =
-          exec.status === "replied"
-            ? isCompleted
-              ? "completed"
-              : "replied"
-            : exec.status === "sent" && exec.followUpStatus === "sent"
-            ? "missed"
-            : exec.status === "sent"
-            ? "sent"
-            : "failed";
+        let status = exec.status;
+
+        // Handle Follow-up states if still just 'sent'
+        if (status === "sent") {
+          if (exec.followUpStatus === "sent") {
+            status = "missed"; // or 'sent_followup' depending on UI needs, treating as risk of missing
+          } else if (exec.followUpStatus === "skipped") {
+            status = "sent";
+          }
+        }
+
+        doc.dailyStatus = status;
 
         doc.lastSentAt = exec.sentAt;
         doc.followUpSent = exec.followUpStatus === "sent";
 
-        if (isCompleted) {
-          doc.replyText = "Marked as Completed via Button";
+        if (status === "completed") {
+          doc.replyText = "Completed via WhatsApp";
+        } else if (status === "replied") {
+          // If we have legacy text store, show it, otherwise generic
+          doc.replyText = r.replyText || "Replied";
         }
       } else {
         // No execution today -> It's Pending or Skipped
