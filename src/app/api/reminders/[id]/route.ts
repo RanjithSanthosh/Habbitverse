@@ -20,8 +20,45 @@ export async function PUT(
       new: true,
       runValidators: true,
     });
+
+    // CRITICAL FIX: Sync with ReminderExecution
+    // If the user manually updates status to "completed" via UI, we must
+    // update the Execution record so the Cron job doesn't send a follow-up.
+    if (body.dailyStatus) {
+      // Get Today's Date in IST (YYYY-MM-DD)
+      const todayDateStr = new Date().toLocaleDateString("en-CA", {
+        timeZone: "Asia/Kolkata",
+      });
+
+      const ReminderExecutionModule = await import(
+        "@/models/ReminderExecution"
+      );
+      const ReminderExecution = ReminderExecutionModule.default;
+
+      const execution = await ReminderExecution.findOne({
+        reminderId: id,
+        date: todayDateStr,
+      });
+
+      if (execution) {
+        if (
+          body.dailyStatus === "completed" ||
+          body.dailyStatus === "replied"
+        ) {
+          execution.status = body.dailyStatus;
+
+          // Cancel follow-up if not sent yet
+          if (execution.followUpStatus === "pending") {
+            execution.followUpStatus = "cancelled_by_user";
+          }
+          await execution.save();
+        }
+      }
+    }
+
     return NextResponse.json(reminder);
   } catch (error) {
+    console.error("Error updating reminder:", error);
     return NextResponse.json(
       { error: "Failed to update reminder" },
       { status: 500 }

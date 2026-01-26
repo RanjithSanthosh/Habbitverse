@@ -6,11 +6,16 @@ export interface IReminderExecution {
   phone: string;
   date: string; // YYYY-MM-DD (IST) representing the "day" of this execution
 
-  status: "sent" | "replied" | "failed";
+  status: "sent" | "replied" | "failed" | "completed";
   sentAt: Date;
   replyReceivedAt?: Date;
 
-  followUpStatus: "pending" | "sent" | "skipped" | "replied_before_followup";
+  followUpStatus:
+    | "pending"
+    | "sent"
+    | "skipped"
+    | "replied_before_followup"
+    | "cancelled_by_user";
   followUpSentAt?: Date;
 
   createdAt?: Date;
@@ -29,7 +34,7 @@ const ReminderExecutionSchema = new Schema<IReminderExecution>(
 
     status: {
       type: String,
-      enum: ["sent", "replied", "failed"],
+      enum: ["sent", "replied", "failed", "completed"],
       default: "sent",
     },
     sentAt: { type: Date, default: Date.now },
@@ -37,7 +42,13 @@ const ReminderExecutionSchema = new Schema<IReminderExecution>(
 
     followUpStatus: {
       type: String,
-      enum: ["pending", "sent", "skipped", "replied_before_followup"],
+      enum: [
+        "pending",
+        "sent",
+        "skipped",
+        "replied_before_followup",
+        "cancelled_by_user",
+      ],
       default: "pending",
     },
     followUpSentAt: { type: Date },

@@ -104,12 +104,21 @@ export async function POST(req: NextRequest) {
             `[Webhook] UPDATE STATUS: ${matchedExecution._id} -> replied`
           );
 
-          matchedExecution.status = "replied";
+          // Determine status based on response
+          let newStatus: "replied" | "completed" = "replied";
+          if (
+            text === "completed_habit" ||
+            text.toLowerCase().includes("complete")
+          ) {
+            newStatus = "completed";
+          }
+
+          matchedExecution.status = newStatus;
           matchedExecution.replyReceivedAt = new Date();
 
           // Explicitly mark follow-up as cancelled if it wasn't sent yet
           if (matchedExecution.followUpStatus === "pending") {
-            matchedExecution.followUpStatus = "replied_before_followup";
+            matchedExecution.followUpStatus = "cancelled_by_user";
           }
 
           await matchedExecution.save();
@@ -117,7 +126,7 @@ export async function POST(req: NextRequest) {
           // --- LEGACY / SYNC SUPPORT ---
           try {
             await Reminder.findByIdAndUpdate(matchedExecution.reminderId, {
-              dailyStatus: "replied",
+              dailyStatus: newStatus,
               replyText: text, // "completed_habit" or user text
               lastRepliedAt: new Date(),
             });

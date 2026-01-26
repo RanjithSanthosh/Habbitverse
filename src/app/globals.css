@@ -1,8 +1,10 @@
 @import "tailwindcss";
 
 :root {
-  --background: #030712; /* gray-950 */
-  --foreground: #f9fafb; /* gray-50 */
+  --background: #f9fafb; /* gray-50 */
+  --foreground: #030712; /* gray-950 */
+  --card-bg: #ffffff;
+  --card-border: #e5e7eb;
 }
 
 body {
