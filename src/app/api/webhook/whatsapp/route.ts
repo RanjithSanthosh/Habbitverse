@@ -29,19 +29,12 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    console.log("[Webhook] Received payload:", JSON.stringify(body, null, 2));
+    console.log("[Webhook] Received message");
 
-    // Check if this is a message from WhatsApp
     if (body.object) {
-      if (
-        body.entry &&
-        body.entry[0].changes &&
-        body.entry[0].changes[0] &&
-        body.entry[0].changes[0].value.messages &&
-        body.entry[0].changes[0].value.messages[0]
-      ) {
+      if (body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
         const message = body.entry[0].changes[0].value.messages[0];
-        const from = message.from; // Phone number e.g. "919876543210"
+        const from = message.from;
 
         let text = "";
         let isButtonReply = false;
@@ -51,14 +44,14 @@ export async function POST(req: NextRequest) {
         } else if (message.type === "interactive") {
           const interactive = message.interactive;
           if (interactive.type === "button_reply") {
-            text = interactive.button_reply.id; // e.g. "completed_habit"
+            text = interactive.button_reply.id;
             isButtonReply = true;
           }
         }
 
         await dbConnect();
 
-        // 1. Log the incoming message FIRST
+        // Log the message
         await MessageLog.create({
           phone: from,
           direction: "inbound",
@@ -68,140 +61,87 @@ export async function POST(req: NextRequest) {
           rawResponse: body,
         });
 
-        console.log(`[Webhook] >>> Incoming Reply <<<`);
+        console.log(`[Webhook] >>> MESSAGE RECEIVED <<<`);
         console.log(`[Webhook] From: ${from}`);
         console.log(`[Webhook] Text: ${text}`);
-        console.log(`[Webhook] Button Reply: ${isButtonReply}`);
+        console.log(`[Webhook] Button: ${isButtonReply}`);
 
-        // 2. Get TODAY in IST
-        const todayStr = getISTDate();
-        console.log(`[Webhook] Today (IST): ${todayStr}`);
+        // ================================================================
+        // IMMEDIATE BLOCKING FUNCTION
+        // When user clicks "Completed", we DIRECTLY block the follow-up
+        // ================================================================
+        const isCompletion =
+          text === "completed_habit" ||
+          text.toLowerCase().includes("complete") ||
+          text.toLowerCase().includes("done");
 
-        // 3. Normalize phone for matching
-        const incomingDigits = from.replace(/\D/g, "");
-        const incomingLast10 = incomingDigits.slice(-10);
-        console.log(
-          `[Webhook] Phone digits: ${incomingDigits}, Last 10: ${incomingLast10}`
-        );
+        if (isCompletion) {
+          console.log(`[Webhook] ⚠️  COMPLETION DETECTED - BLOCKING FOLLOW-UP`);
 
-        // 4. Find ALL executions for TODAY (no status filter)
-        const todaysExecutions = await ReminderExecution.find({
-          date: todayStr,
-        }).sort({ sentAt: -1 });
+          try {
+            // Call the dedicated blocking endpoint
+            const blockResponse = await fetch(
+              `${
+                process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+              }/api/block-followup`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ phone: from }),
+              }
+            );
 
-        console.log(
-          `[Webhook] Found ${todaysExecutions.length} executions for today`
-        );
+            const blockResult = await blockResponse.json();
 
-        // 5. Match by phone number (last 10 digits)
-        let matchedExecution = null;
-        for (const exec of todaysExecutions) {
-          const dbDigits = exec.phone.replace(/\D/g, "");
-          const dbLast10 = dbDigits.slice(-10);
+            console.log(`[Webhook] Block result:`, blockResult);
 
-          console.log(
-            `[Webhook] Checking exec ${exec._id}: phone=${exec.phone}, digits=${dbDigits}, last10=${dbLast10}`
-          );
+            if (blockResult.success) {
+              console.log(
+                `[Webhook] ✓ FOLLOW-UP BLOCKED - ${blockResult.blocked} executions updated`
+              );
 
-          if (dbLast10 === incomingLast10) {
-            matchedExecution = exec;
-            console.log(`[Webhook] ✓ MATCH FOUND by last 10 digits!`);
-            break;
-          }
-
-          // Fallback: exact match
-          if (dbDigits === incomingDigits) {
-            matchedExecution = exec;
-            console.log(`[Webhook] ✓ MATCH FOUND by exact digits!`);
-            break;
-          }
-        }
-
-        if (matchedExecution) {
-          console.log(`[Webhook] >>> PROCESSING MATCH <<<`);
-          console.log(`[Webhook] Execution ID: ${matchedExecution._id}`);
-          console.log(`[Webhook] Current Status: ${matchedExecution.status}`);
-          console.log(
-            `[Webhook] Current FollowUp: ${matchedExecution.followUpStatus}`
-          );
-
-          // 6. Determine if this is a completion
-          let newStatus: "replied" | "completed" = "replied";
-
-          if (
-            text === "completed_habit" ||
-            text.toLowerCase().includes("complete") ||
-            text.toLowerCase().includes("done")
-          ) {
-            newStatus = "completed";
-            console.log(`[Webhook] Detected COMPLETION keyword`);
-          }
-
-          // 7. Update the execution
-          matchedExecution.status = newStatus;
-          matchedExecution.replyReceivedAt = new Date();
-
-          // 8. CRITICAL: Cancel the follow-up
-          if (matchedExecution.followUpStatus === "pending") {
-            matchedExecution.followUpStatus = "cancelled_by_user";
-            console.log(`[Webhook] ⚠️  CANCELLING PENDING FOLLOW-UP`);
-          }
-
-          // 9. Save to database
-          await matchedExecution.save();
-          console.log(
-            `[Webhook] ✓ Saved status=${newStatus}, followUpStatus=${matchedExecution.followUpStatus}`
-          );
-
-          // 10. Verify the save worked
-          const verified = await ReminderExecution.findById(
-            matchedExecution._id
-          );
-          console.log(
-            `[Webhook] Verification - DB status: ${verified?.status}, followUp: ${verified?.followUpStatus}`
-          );
-
-          // 11. Send confirmation to user
-          if (newStatus === "completed") {
-            try {
-              console.log(`[Webhook] Sending confirmation message...`);
+              // Send confirmation
               await sendWhatsAppMessage(
                 from,
-                "Great job! ✅ Response recorded. Follow-up cancelled."
+                "✅ Completed! Great job. Follow-up cancelled."
               );
-            } catch (e) {
-              console.error("[Webhook] Failed to send confirmation:", e);
+            } else {
+              console.error(`[Webhook] ✗ Block failed:`, blockResult.error);
+
+              // Fallback: Try direct database update
+              console.log(`[Webhook] Attempting direct database update...`);
+              await directBlockFollowup(from);
             }
-          }
+          } catch (error) {
+            console.error(`[Webhook] ✗ Error calling block endpoint:`, error);
 
-          // 12. Update legacy Reminder model (optional sync)
-          try {
-            await Reminder.findByIdAndUpdate(matchedExecution.reminderId, {
-              dailyStatus: newStatus,
-              replyText: text,
-              lastRepliedAt: new Date(),
-            });
-            console.log(`[Webhook] ✓ Updated legacy Reminder model`);
-          } catch (err) {
-            console.error("[Webhook] Failed to update Reminder:", err);
+            // Fallback: Direct database update
+            console.log(`[Webhook] Attempting direct database update...`);
+            await directBlockFollowup(from);
           }
-
-          console.log(`[Webhook] >>> SUCCESS - Processing complete <<<`);
         } else {
-          console.log(`[Webhook] ✗ NO MATCH FOUND`);
-          console.log(
-            `[Webhook] Searched for phone ending in: ${incomingLast10}`
-          );
-          console.log(`[Webhook] Date searched: ${todayStr}`);
-          console.log(
-            `[Webhook] Available executions:`,
-            todaysExecutions.map((e) => ({
-              id: e._id,
-              phone: e.phone,
-              date: e.date,
-              status: e.status,
-            }))
-          );
+          // Regular reply (not completion)
+          console.log(`[Webhook] Regular reply received`);
+
+          const todayStr = getISTDate();
+          const phoneDigits = from.replace(/\D/g, "");
+          const phoneLast10 = phoneDigits.slice(-10);
+
+          const executions = await ReminderExecution.find({ date: todayStr });
+
+          const matched = executions.find((exec) => {
+            const execDigits = exec.phone.replace(/\D/g, "");
+            return execDigits.slice(-10) === phoneLast10;
+          });
+
+          if (matched) {
+            matched.status = "replied";
+            matched.followUpStatus = "cancelled_by_user";
+            matched.replyReceivedAt = new Date();
+            await matched.save();
+
+            console.log(`[Webhook] ✓ Marked as replied - follow-up cancelled`);
+          }
         }
       }
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
@@ -209,5 +149,42 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("[Webhook] ✗ ERROR:", error);
     return new NextResponse("Internal Server Error", { status: 500 });
+  }
+}
+
+// Fallback function for direct blocking
+async function directBlockFollowup(phone: string) {
+  try {
+    const todayStr = getISTDate();
+    const phoneDigits = phone.replace(/\D/g, "");
+    const phoneLast10 = phoneDigits.slice(-10);
+
+    const executions = await ReminderExecution.find({ date: todayStr });
+
+    let blocked = 0;
+    for (const exec of executions) {
+      const execDigits = exec.phone.replace(/\D/g, "");
+      if (execDigits.slice(-10) === phoneLast10) {
+        console.log(`[Webhook] Direct blocking execution ${exec._id}`);
+
+        exec.status = "completed";
+        exec.followUpStatus = "cancelled_by_user";
+        exec.replyReceivedAt = new Date();
+        await exec.save();
+
+        blocked++;
+      }
+    }
+
+    console.log(`[Webhook] ✓ Direct block completed - ${blocked} executions`);
+
+    if (blocked > 0) {
+      await sendWhatsAppMessage(
+        phone,
+        "✅ Completed! Great job. Follow-up cancelled."
+      );
+    }
+  } catch (error) {
+    console.error(`[Webhook] Direct block failed:`, error);
   }
 }
