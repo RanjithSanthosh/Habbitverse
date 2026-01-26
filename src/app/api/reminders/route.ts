@@ -3,13 +3,7 @@ import dbConnect from "@/lib/db";
 import Reminder from "@/models/Reminder";
 import ReminderExecution from "@/models/ReminderExecution";
 import { verifyAuth, unauthorized } from "@/lib/auth";
-
-// Helper: Get Today's Date in IST
-const getISTDate = () => {
-  return new Date().toLocaleDateString("en-CA", {
-    timeZone: "Asia/Kolkata",
-  });
-};
+import { getISTDate } from "@/lib/dateUtils";
 
 export async function GET(req: NextRequest) {
   const auth = await verifyAuth(req);

@@ -4,23 +4,7 @@ import Reminder from "@/models/Reminder";
 import ReminderExecution from "@/models/ReminderExecution";
 import MessageLog from "@/models/MessageLog";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
-
-// Helper: Get Current Time in IST (HH:MM)
-const getISTTime = () => {
-  return new Date().toLocaleTimeString("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Asia/Kolkata",
-  });
-};
-
-// Helper: Get Today's Date in IST (YYYY-MM-DD)
-const getISTDate = () => {
-  return new Date().toLocaleDateString("en-CA", {
-    timeZone: "Asia/Kolkata",
-  });
-};
+import { getISTDate, getISTTime } from "@/lib/dateUtils";
 
 // Helper: Convert "HH:MM" to minutes from midnight
 const getMinutesFromMidnight = (timeStr: string) => {
