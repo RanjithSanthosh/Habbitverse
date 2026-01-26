@@ -25,15 +25,17 @@ export async function GET(req: NextRequest) {
   const todayDateStr = getISTDate();
   const nowMinutes = getMinutesFromMidnight(nowTimeStr);
 
+  console.log(`\n========================================`);
   console.log(
-    `[Cron] Running at IST: ${todayDateStr} ${nowTimeStr} (${nowMinutes}m)`
+    `[Cron] STARTED at IST: ${todayDateStr} ${nowTimeStr} (${nowMinutes}m)`
   );
+  console.log(`========================================\n`);
 
   const results = [];
 
   // --- 1. Process REMINDERS (Send initial message) ---
-  // Get all active reminder configurations
   const activeReminders = await Reminder.find({ isActive: true });
+  console.log(`[Cron] Found ${activeReminders.length} active reminder configs`);
 
   for (const reminder of activeReminders) {
     try {
@@ -62,7 +64,7 @@ export async function GET(req: NextRequest) {
           [{ id: "completed_habit", title: "Completed" }]
         );
 
-        // Log the attempt (raw log)
+        // Log the attempt
         await MessageLog.create({
           reminderId: reminder._id,
           phone: reminder.phone,
@@ -79,15 +81,19 @@ export async function GET(req: NextRequest) {
             reminderId: reminder._id,
             phone: reminder.phone,
             date: todayDateStr,
-            status: "sent", // Initial status
+            status: "sent",
             sentAt: new Date(),
             followUpStatus: "pending",
           });
 
-          // Legacy support: Update the Reminder model too for now
+          // Legacy support
           reminder.lastSentAt = new Date();
           reminder.dailyStatus = "sent";
           await reminder.save();
+
+          console.log(
+            `[Cron] ✓ Created execution record for ${reminder.phone}`
+          );
 
           results.push({
             id: reminder._id,
@@ -96,6 +102,10 @@ export async function GET(req: NextRequest) {
             phone: reminder.phone,
           });
         } else {
+          console.error(
+            `[Cron] ✗ Failed to send to ${reminder.phone}:`,
+            res.error
+          );
           results.push({
             id: reminder._id,
             type: "reminder",
@@ -116,116 +126,120 @@ export async function GET(req: NextRequest) {
   }
 
   // --- 2. Process FOLLOW-UPS ---
-  // Iterate through TODAY'S executions that are still pending follow-up
-  // AND where the user has NOT replied yet.
+  console.log(`\n[Cron] >>> FOLLOW-UP CHECK <<<`);
+  console.log(`[Cron] Looking for executions with:`);
+  console.log(`[Cron]   - date: ${todayDateStr}`);
+  console.log(`[Cron]   - status: "sent"`);
+  console.log(`[Cron]   - followUpStatus: "pending"`);
+
   const pendingFollowUps = await ReminderExecution.find({
     date: todayDateStr,
-    status: "sent", // Means NO reply received yet (otherwise it would be 'replied')
+    status: "sent",
     followUpStatus: "pending",
-  }).populate("reminderId"); // We need the config to get followUpTime and message
+  }).populate("reminderId");
 
-  if (pendingFollowUps.length > 0) {
-    console.log(
-      `[Cron] Found ${pendingFollowUps.length} candidates for follow-up.`
-    );
-  }
+  console.log(
+    `[Cron] Found ${pendingFollowUps.length} candidates for follow-up check\n`
+  );
 
   for (const executionItem of pendingFollowUps) {
     try {
-      // CRITICAL: Re-fetch the execution to ensure we have the LATEST status.
-      // The user might have replied milliseconds ago, or while the loop was running.
+      console.log(`\n[Cron] --- Processing Execution ${executionItem._id} ---`);
+      console.log(`[Cron] Phone: ${executionItem.phone}`);
+      console.log(`[Cron] Sent At: ${executionItem.sentAt}`);
+      console.log(`[Cron] Current Status: ${executionItem.status}`);
+      console.log(`[Cron] Current FollowUp: ${executionItem.followUpStatus}`);
+
+      // CRITICAL: Re-fetch to get LATEST state
       const execution = await ReminderExecution.findById(
         executionItem._id
       ).populate("reminderId");
 
-      if (!execution) continue; // Should not happen
+      if (!execution) {
+        console.log(`[Cron] ✗ Execution not found (deleted?)`);
+        continue;
+      }
 
-      // strict status check
-      if (execution.status === "completed" || execution.status === "replied") {
+      console.log(
+        `[Cron] After re-fetch - Status: ${execution.status}, FollowUp: ${execution.followUpStatus}`
+      );
+
+      // STRICT CHECK 1: Status must be "sent"
+      if (execution.status !== "sent") {
         console.log(
-          `[Cron] Skipping follow-up for ${execution._id}: User already replied/completed.`
+          `[Cron] ✓ SKIP - Status is "${execution.status}" (not "sent")`
         );
         continue;
       }
 
+      // STRICT CHECK 2: FollowUpStatus must be "pending"
       if (execution.followUpStatus !== "pending") {
         console.log(
-          `[Cron] Skipping follow-up for ${execution._id}: Status is ${execution.followUpStatus}`
+          `[Cron] ✓ SKIP - FollowUpStatus is "${execution.followUpStatus}" (not "pending")`
         );
         continue;
       }
 
-      const config = execution.reminderId as any; // Type assertion
+      const config = execution.reminderId as any;
 
       if (!config || !config.isActive) {
-        continue; // Config deleted or disabled
+        console.log(`[Cron] ✓ SKIP - Config deleted or inactive`);
+        continue;
       }
 
-      // -----------------------------------------------------------------------
-      // FAILSAFE: Check Message Logs for missed replies
-      // The user wants the Cron to explicitly check if a reply was received
-      // -----------------------------------------------------------------------
+      // FAILSAFE: Check Message Logs
+      console.log(`[Cron] Checking message logs for replies...`);
       const lastSentTime = execution.sentAt;
       if (lastSentTime) {
-        // Normalize phone for log search (remove non-digits)
         const execPhoneDigits = execution.phone.replace(/\D/g, "");
-
-        // Find any INBOUND message from this number created AFTER the reminder was sent
-        // We need to match loose phone numbers, so we might need a regex or simply check matches in memory if volume is low.
-        // For efficiency, let's look for logs created > lastSentTime
+        const execLast10 = execPhoneDigits.slice(-10);
 
         const recentLogs = await MessageLog.find({
           direction: "inbound",
           createdAt: { $gt: lastSentTime },
         });
 
-        // Filter in memory for phone match (robust)
+        console.log(
+          `[Cron] Found ${recentLogs.length} inbound messages since reminder sent`
+        );
+
         const matchedLog = recentLogs.find((log) => {
           const logPhoneDigits = log.phone.replace(/\D/g, "");
-          return (
-            logPhoneDigits.includes(execPhoneDigits.slice(-10)) ||
-            execPhoneDigits.includes(logPhoneDigits.slice(-10))
-          );
+          const logLast10 = logPhoneDigits.slice(-10);
+          return logLast10 === execLast10;
         });
 
         if (matchedLog) {
+          console.log(`[Cron] ⚠️  FOUND REPLY IN LOGS!`);
+          console.log(`[Cron] Content: "${matchedLog.content}"`);
+
           const lowerContent = (matchedLog.content || "").toLowerCase();
+          let detectedStatus: "completed" | "replied" = "replied";
+
           if (
             lowerContent.includes("complete") ||
             lowerContent === "completed_habit" ||
             lowerContent.includes("done")
           ) {
-            console.log(
-              `[Cron] Failsafe: Found completion reply in logs for ${execution.phone}. Aborting follow-up.`
-            );
-
-            // Self-heal
-            execution.status = "completed";
-            execution.followUpStatus = "cancelled_by_user";
-            execution.replyReceivedAt = matchedLog.createdAt;
-            await execution.save();
-            continue; // SKIP
-          } else {
-            // They replied something else, maybe "Not yet"
-            // Technically this is still a "Reply", so we should record it and maybe skip?
-            // Requirement: "when i click completed button" -> specific check.
-            // But general reply usually stops follow-up too.
-            console.log(
-              `[Cron] Failsafe: Found generic reply in logs for ${execution.phone}. Aborting follow-up.`
-            );
-
-            execution.status = "replied";
-            execution.followUpStatus = "cancelled_by_user";
-            execution.replyReceivedAt = matchedLog.createdAt;
-            await execution.save();
-            continue; // SKIP
+            detectedStatus = "completed";
           }
+
+          console.log(`[Cron] Auto-healing status to: ${detectedStatus}`);
+
+          execution.status = detectedStatus;
+          execution.followUpStatus = "cancelled_by_user";
+          execution.replyReceivedAt = matchedLog.createdAt;
+          await execution.save();
+
+          console.log(`[Cron] ✓ SKIP - Auto-healed and cancelled follow-up`);
+          continue;
+        } else {
+          console.log(`[Cron] No matching reply found in logs`);
         }
       }
-      // -----------------------------------------------------------------------
 
       if (!config.followUpTime) {
-        // No follow-up configured, mark skipped
+        console.log(`[Cron] ✓ SKIP - No follow-up time configured`);
         execution.followUpStatus = "skipped";
         await execution.save();
         continue;
@@ -233,20 +247,25 @@ export async function GET(req: NextRequest) {
 
       const followUpMinutes = getMinutesFromMidnight(config.followUpTime);
 
+      console.log(
+        `[Cron] Follow-up scheduled for: ${config.followUpTime} (${followUpMinutes}m)`
+      );
+      console.log(`[Cron] Current time: ${nowTimeStr} (${nowMinutes}m)`);
+
       // Check if follow-up time is reached
       if (nowMinutes >= followUpMinutes) {
-        // Double check strict timing (Safety)
+        // Sanity check
         const reminderMinutes = getMinutesFromMidnight(config.reminderTime);
         if (followUpMinutes <= reminderMinutes) {
           console.warn(
-            `[Cron] Config Error: Follow-up time ${config.followUpTime} is <= Reminder time ${config.reminderTime}`
+            `[Cron] ✗ CONFIG ERROR: Follow-up time ${config.followUpTime} is <= Reminder time ${config.reminderTime}`
           );
           continue;
         }
 
-        console.log(
-          `[Cron] Sending Follow-up: ${config.title} to ${execution.phone}`
-        );
+        console.log(`[Cron] >>> SENDING FOLLOW-UP <<<`);
+        console.log(`[Cron] To: ${execution.phone}`);
+        console.log(`[Cron] Message: ${config.followUpMessage}`);
 
         const res = await sendWhatsAppMessage(
           execution.phone,
@@ -268,6 +287,8 @@ export async function GET(req: NextRequest) {
           execution.followUpSentAt = new Date();
           await execution.save();
 
+          console.log(`[Cron] ✓ Follow-up SENT successfully`);
+
           results.push({
             id: execution._id,
             type: "followup",
@@ -275,6 +296,7 @@ export async function GET(req: NextRequest) {
             phone: execution.phone,
           });
         } else {
+          console.log(`[Cron] ✗ Follow-up FAILED:`, res.error);
           results.push({
             id: execution._id,
             type: "followup",
@@ -282,10 +304,16 @@ export async function GET(req: NextRequest) {
             error: res.error,
           });
         }
+      } else {
+        console.log(
+          `[Cron] ✓ SKIP - Not time yet (need ${
+            followUpMinutes - nowMinutes
+          } more minutes)`
+        );
       }
     } catch (err: any) {
       console.error(
-        `[Cron] Error processing follow-up execution ${executionItem._id}:`,
+        `[Cron] ✗ Error processing follow-up ${executionItem._id}:`,
         err
       );
       results.push({
@@ -296,6 +324,10 @@ export async function GET(req: NextRequest) {
       });
     }
   }
+
+  console.log(`\n========================================`);
+  console.log(`[Cron] COMPLETED - Processed ${results.length} actions`);
+  console.log(`========================================\n`);
 
   return NextResponse.json({
     success: true,

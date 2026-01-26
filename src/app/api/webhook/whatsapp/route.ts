@@ -4,6 +4,7 @@ import Reminder from "@/models/Reminder";
 import ReminderExecution from "@/models/ReminderExecution";
 import MessageLog from "@/models/MessageLog";
 import { getISTDate } from "@/lib/dateUtils";
+import { sendWhatsAppMessage } from "@/lib/whatsapp";
 
 // GET request for Webhook Verification
 export async function GET(req: NextRequest) {
@@ -25,10 +26,10 @@ export async function GET(req: NextRequest) {
 }
 
 // POST request for Incoming Messages
-// POST request for Incoming Messages
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    console.log("[Webhook] Received payload:", JSON.stringify(body, null, 2));
 
     // Check if this is a message from WhatsApp
     if (body.object) {
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
 
         await dbConnect();
 
-        // 1. Log the incoming message
+        // 1. Log the incoming message FIRST
         await MessageLog.create({
           phone: from,
           direction: "inbound",
@@ -67,37 +68,64 @@ export async function POST(req: NextRequest) {
           rawResponse: body,
         });
 
-        console.log(`[Webhook] Reply from: ${from} | Text: ${text}`);
+        console.log(`[Webhook] >>> Incoming Reply <<<`);
+        console.log(`[Webhook] From: ${from}`);
+        console.log(`[Webhook] Text: ${text}`);
+        console.log(`[Webhook] Button Reply: ${isButtonReply}`);
 
-        // 2. Normalize Phone Numbers for Matching
-        // Standardize: Remove all non-digits. We match based on the last 10 digits to be safe.
+        // 2. Get TODAY in IST
+        const todayStr = getISTDate();
+        console.log(`[Webhook] Today (IST): ${todayStr}`);
+
+        // 3. Normalize phone for matching
         const incomingDigits = from.replace(/\D/g, "");
         const incomingLast10 = incomingDigits.slice(-10);
+        console.log(
+          `[Webhook] Phone digits: ${incomingDigits}, Last 10: ${incomingLast10}`
+        );
 
-        // 3. Find Active Executions for TODAY
-        const todayStr = getISTDate();
-
-        // Find ALL executions for today (don't filter by status 'sent', looking for ANY match)
+        // 4. Find ALL executions for TODAY (no status filter)
         const todaysExecutions = await ReminderExecution.find({
           date: todayStr,
         }).sort({ sentAt: -1 });
 
-        // 4. Find the specific execution for this phone number
-        const matchedExecution = todaysExecutions.find((exec) => {
-          const dbDigits = exec.phone.replace(/\D/g, "");
-          // Strict match if lengths are small (unlikely), else suffix match
-          if (dbDigits.length < 10 || incomingDigits.length < 10) {
-            return dbDigits === incomingDigits;
-          }
-          return dbDigits.slice(-10) === incomingLast10;
-        });
+        console.log(
+          `[Webhook] Found ${todaysExecutions.length} executions for today`
+        );
 
-        if (matchedExecution) {
+        // 5. Match by phone number (last 10 digits)
+        let matchedExecution = null;
+        for (const exec of todaysExecutions) {
+          const dbDigits = exec.phone.replace(/\D/g, "");
+          const dbLast10 = dbDigits.slice(-10);
+
           console.log(
-            `[Webhook] MATCH FOUND: ${matchedExecution._id} (Current Status: ${matchedExecution.status})`
+            `[Webhook] Checking exec ${exec._id}: phone=${exec.phone}, digits=${dbDigits}, last10=${dbLast10}`
           );
 
-          // 5. Determine New Status & Update
+          if (dbLast10 === incomingLast10) {
+            matchedExecution = exec;
+            console.log(`[Webhook] ✓ MATCH FOUND by last 10 digits!`);
+            break;
+          }
+
+          // Fallback: exact match
+          if (dbDigits === incomingDigits) {
+            matchedExecution = exec;
+            console.log(`[Webhook] ✓ MATCH FOUND by exact digits!`);
+            break;
+          }
+        }
+
+        if (matchedExecution) {
+          console.log(`[Webhook] >>> PROCESSING MATCH <<<`);
+          console.log(`[Webhook] Execution ID: ${matchedExecution._id}`);
+          console.log(`[Webhook] Current Status: ${matchedExecution.status}`);
+          console.log(
+            `[Webhook] Current FollowUp: ${matchedExecution.followUpStatus}`
+          );
+
+          // 6. Determine if this is a completion
           let newStatus: "replied" | "completed" = "replied";
 
           if (
@@ -106,60 +134,80 @@ export async function POST(req: NextRequest) {
             text.toLowerCase().includes("done")
           ) {
             newStatus = "completed";
+            console.log(`[Webhook] Detected COMPLETION keyword`);
           }
 
-          // Update Status
+          // 7. Update the execution
           matchedExecution.status = newStatus;
           matchedExecution.replyReceivedAt = new Date();
 
-          // CRITICAL: Cancel Follow-up if it hasn't been sent yet
-          // If status is 'completed' or 'replied', we generally want to stop the pestering.
+          // 8. CRITICAL: Cancel the follow-up
           if (matchedExecution.followUpStatus === "pending") {
-            console.log(
-              `[Webhook] Cancelling pending follow-up for ${matchedExecution._id}`
-            );
             matchedExecution.followUpStatus = "cancelled_by_user";
+            console.log(`[Webhook] ⚠️  CANCELLING PENDING FOLLOW-UP`);
           }
 
+          // 9. Save to database
           await matchedExecution.save();
+          console.log(
+            `[Webhook] ✓ Saved status=${newStatus}, followUpStatus=${matchedExecution.followUpStatus}`
+          );
 
-          // --- AUTO-CONFIRMATION MESSAGE ---
-          // User requested: "auto completed message will be reseved to us"
+          // 10. Verify the save worked
+          const verified = await ReminderExecution.findById(
+            matchedExecution._id
+          );
+          console.log(
+            `[Webhook] Verification - DB status: ${verified?.status}, followUp: ${verified?.followUpStatus}`
+          );
+
+          // 11. Send confirmation to user
           if (newStatus === "completed") {
             try {
-              await import("@/lib/whatsapp").then((mod) =>
-                mod.sendWhatsAppMessage(
-                  from,
-                  "Great job! ✅ Response recorded."
-                )
+              console.log(`[Webhook] Sending confirmation message...`);
+              await sendWhatsAppMessage(
+                from,
+                "Great job! ✅ Response recorded. Follow-up cancelled."
               );
             } catch (e) {
-              console.error("Failed to send auto-reply confirmation", e);
+              console.error("[Webhook] Failed to send confirmation:", e);
             }
           }
 
-          // --- LEGACY SYNC (Optional but good for fallback) ---
+          // 12. Update legacy Reminder model (optional sync)
           try {
             await Reminder.findByIdAndUpdate(matchedExecution.reminderId, {
               dailyStatus: newStatus,
               replyText: text,
               lastRepliedAt: new Date(),
             });
+            console.log(`[Webhook] ✓ Updated legacy Reminder model`);
           } catch (err) {
-            // Ignore legacy update errors
+            console.error("[Webhook] Failed to update Reminder:", err);
           }
 
-          console.log(`[Webhook] Successfully updated status to ${newStatus}`);
+          console.log(`[Webhook] >>> SUCCESS - Processing complete <<<`);
         } else {
+          console.log(`[Webhook] ✗ NO MATCH FOUND`);
           console.log(
-            `[Webhook] NO MATCH for ${from} on ${todayStr}. Candidates: ${todaysExecutions.length}`
+            `[Webhook] Searched for phone ending in: ${incomingLast10}`
+          );
+          console.log(`[Webhook] Date searched: ${todayStr}`);
+          console.log(
+            `[Webhook] Available executions:`,
+            todaysExecutions.map((e) => ({
+              id: e._id,
+              phone: e.phone,
+              date: e.date,
+              status: e.status,
+            }))
           );
         }
       }
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
   } catch (error) {
-    console.error("Webhook Error:", error);
+    console.error("[Webhook] ✗ ERROR:", error);
     return new NextResponse("Internal Server Error", { status: 500 });
   }
 }
