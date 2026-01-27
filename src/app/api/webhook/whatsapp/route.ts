@@ -63,17 +63,28 @@ export async function POST(req: NextRequest) {
 
         console.log(`[Webhook] >>> MESSAGE RECEIVED <<<`);
         console.log(`[Webhook] From: ${from}`);
-        console.log(`[Webhook] Text: ${text}`);
+        console.log(`[Webhook] Text: "${text}"`);
+        console.log(`[Webhook] Text Length: ${text.length}`);
         console.log(`[Webhook] Button: ${isButtonReply}`);
 
         // ================================================================
         // IMMEDIATE BLOCKING FUNCTION
         // When user clicks "Completed", we DIRECTLY block the follow-up
         // ================================================================
+
+        // Normalize text: trim whitespace and convert to lowercase
+        const normalizedText = text.trim().toLowerCase();
+        console.log(`[Webhook] Normalized Text: "${normalizedText}"`);
+
         const isCompletion =
-          text === "completed_habit" ||
-          text.toLowerCase().includes("complete") ||
-          text.toLowerCase().includes("done");
+          text === "completed_habit" || // Button ID (exact match)
+          normalizedText === "completed" ||
+          normalizedText === "complete" ||
+          normalizedText === "done" ||
+          normalizedText.includes("complete") ||
+          normalizedText.includes("done");
+
+        console.log(`[Webhook] isCompletion: ${isCompletion}`);
 
         if (isCompletion) {
           console.log(`[Webhook] ⚠️  COMPLETION DETECTED - BLOCKING FOLLOW-UP`);

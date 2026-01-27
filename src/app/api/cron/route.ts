@@ -281,13 +281,20 @@ export async function GET(req: NextRequest) {
           console.log(`[Cron] ⚠️  FOUND REPLY IN LOGS!`);
           console.log(`[Cron] Content: "${matchedLog.content}"`);
 
-          const lowerContent = (matchedLog.content || "").toLowerCase();
+          const normalizedContent = (matchedLog.content || "")
+            .trim()
+            .toLowerCase();
+          console.log(`[Cron] Normalized Content: "${normalizedContent}"`);
+
           let detectedStatus: "completed" | "replied" = "replied";
 
           if (
-            lowerContent.includes("complete") ||
-            lowerContent === "completed_habit" ||
-            lowerContent.includes("done")
+            normalizedContent === "completed" ||
+            normalizedContent === "complete" ||
+            normalizedContent === "done" ||
+            normalizedContent === "completed_habit" ||
+            normalizedContent.includes("complete") ||
+            normalizedContent.includes("done")
           ) {
             detectedStatus = "completed";
           }
