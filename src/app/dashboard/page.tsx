@@ -122,7 +122,7 @@ export default function Dashboard() {
                     <h1 className="text-3xl font-bold tracking-tight text-gray-900 bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-cyan-600 inline-block">
                         HabbitVerse Monitor
                     </h1>
-                    <p className="mt-1 text-gray-500">Live habit tracking and automated reminders.</p>
+                    <p className="mt-1 text-gray-500">One-time reminders with smart follow-up tracking.</p>
                 </div>
                 <div className="flex items-center gap-6">
                     <div className="flex gap-6 text-sm text-gray-500 mr-4">
@@ -143,7 +143,7 @@ export default function Dashboard() {
                         onClick={() => setShowModal(true)}
                         className="flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 font-medium text-white shadow-md shadow-indigo-500/20 transition hover:bg-indigo-500"
                     >
-                        <Plus size={18} /> New Tracker
+                        <Plus size={18} /> New Reminder
                     </button>
                 </div>
             </header>
@@ -153,8 +153,9 @@ export default function Dashboard() {
                 <div className="flex justify-center p-20 text-indigo-500 animate-pulse">Loading reminders...</div>
             ) : reminders.length === 0 ? (
                 <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white">
-                    <p className="text-gray-400">No trackers found.</p>
-                    <button onClick={() => setShowModal(true)} className="mt-4 text-indigo-500 hover:text-indigo-600 font-medium">Create your first one</button>
+                    <p className="text-gray-400">No reminders found.</p>
+                    <p className="text-xs text-gray-400 mt-2">Each reminder executes once with smart follow-up</p>
+                    <button onClick={() => setShowModal(true)} className="mt-4 text-indigo-500 hover:text-indigo-600 font-medium">Create your first reminder</button>
                 </div>
             ) : (
                 <div className="grid gap-6 sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
@@ -166,7 +167,12 @@ export default function Dashboard() {
                             {/* Top Row */}
                             <div className="mb-6 flex items-start justify-between">
                                 <div>
-                                    <h3 className="text-lg font-bold text-gray-900">{reminder.title}</h3>
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <h3 className="text-lg font-bold text-gray-900">{reminder.title}</h3>
+                                        {!reminder.isActive && (
+                                            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-gray-200 text-gray-600 uppercase">Executed</span>
+                                        )}
+                                    </div>
                                     <div className="mt-1 flex items-center gap-2 text-sm text-gray-500">
                                         <Phone size={14} className="text-gray-400" />
                                         <span>{reminder.phone}</span>
@@ -286,7 +292,7 @@ export default function Dashboard() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
                     <div className="w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl">
                         <div className="mb-6 flex items-center justify-between">
-                            <h2 className="text-xl font-bold text-gray-900">New Reminder Config</h2>
+                            <h2 className="text-xl font-bold text-gray-900">New One-Time Reminder</h2>
                             <button
                                 onClick={() => setShowModal(false)}
                                 className="rounded-full p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
@@ -328,6 +334,7 @@ export default function Dashboard() {
                                     className="w-full rounded-lg bg-gray-50 border border-gray-200 p-2.5 text-gray-900 focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
                                     value={formData.message} onChange={e => setFormData({ ...formData, message: e.target.value })}
                                 />
+                                <p className="mt-1 text-xs text-gray-500">⚡ This will be sent once at the scheduled time</p>
                             </div>
 
                             <div className="grid grid-cols-3 gap-4">
@@ -347,12 +354,18 @@ export default function Dashboard() {
                                 </div>
                             </div>
 
+                            <div className="mt-6 border-t border-gray-100 pt-4">
+                                <div className="mb-3 rounded-lg bg-indigo-50 p-3 text-xs text-indigo-700">
+                                    <strong>ℹ️ How it works:</strong> This reminder will execute <strong>once</strong> at the scheduled time. If no reply is received, a follow-up will be sent. You can create multiple reminders as needed.
+                                </div>
+                            </div>
+
                             <button
                                 type="submit"
                                 disabled={submitting}
                                 className="mt-4 w-full rounded-lg bg-indigo-600 py-3 font-semibold text-white shadow-lg shadow-indigo-500/20 hover:bg-indigo-500 hover:shadow-indigo-500/30 transition-all disabled:opacity-50"
                             >
-                                {submitting ? 'Saving...' : 'Create Scheduler'}
+                                {submitting ? 'Creating...' : '✨ Create One-Time Reminder'}
                             </button>
                         </form>
                     </div>

@@ -1,3 +1,28 @@
+/**
+ * ============================================================
+ * REMINDER SYSTEM - ONE-TIME EXECUTION MODEL
+ * ============================================================
+ *
+ * HOW IT WORKS:
+ * 1. Users create reminders with a phone number, message, time, and follow-up
+ * 2. Each reminder executes EXACTLY ONCE when its scheduled time is reached
+ * 3. After sending, the reminder is automatically deactivated (isActive = false)
+ * 4. Users can create MULTIPLE reminders - each is independent
+ *
+ * REPLY TRACKING:
+ * - System watches for replies between reminder time and follow-up time
+ * - If user replies before follow-up time, the follow-up is cancelled
+ * - Status is updated to "replied" or "completed" in ReminderExecution
+ *
+ * FOLLOW-UP LOGIC:
+ * - Follow-ups only send if:
+ *   a) Status is still "sent" (user hasn't replied)
+ *   b) FollowUpStatus is "pending" (not cancelled)
+ *   c) Current time >= follow-up time
+ *
+ * ============================================================
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/db";
 import Reminder from "@/models/Reminder";
@@ -39,14 +64,24 @@ export async function GET(req: NextRequest) {
 
   for (const reminder of activeReminders) {
     try {
-      // Check if we already executed this reminder TODAY
-      const existingExecution = await ReminderExecution.findOne({
+      // ============================================================
+      // ONE-TIME EXECUTION CHECK:
+      // Check if this reminder has EVER been executed (not just today)
+      // ============================================================
+      const anyExecution = await ReminderExecution.findOne({
         reminderId: reminder._id,
-        date: todayDateStr,
       });
 
-      if (existingExecution) {
-        // Already processed for today
+      if (anyExecution) {
+        // This reminder was already sent before - it's a ONE-TIME reminder
+        // Deactivate it so it doesn't appear in future cron runs
+        if (reminder.isActive) {
+          reminder.isActive = false;
+          await reminder.save();
+          console.log(
+            `[Cron] ⚡ Deactivated reminder ${reminder._id} (already executed once)`
+          );
+        }
         continue;
       }
 
@@ -55,7 +90,7 @@ export async function GET(req: NextRequest) {
       // Check if it's time to send
       if (nowMinutes >= reminderMinutes) {
         console.log(
-          `[Cron] Sending Initial Reminder: ${reminder.title} to ${reminder.phone}`
+          `[Cron] 📨 Sending ONE-TIME Reminder: ${reminder.title} to ${reminder.phone}`
         );
 
         const res = await sendWhatsAppMessage(
@@ -86,11 +121,18 @@ export async function GET(req: NextRequest) {
             followUpStatus: "pending",
           });
 
-          // Legacy support
+          // ============================================================
+          // ONE-TIME EXECUTION: Deactivate after sending
+          // This prevents it from being sent again tomorrow
+          // ============================================================
           reminder.lastSentAt = new Date();
           reminder.dailyStatus = "sent";
+          reminder.isActive = false; // ⚡ KEY CHANGE: Deactivate after first send
           await reminder.save();
 
+          console.log(
+            `[Cron] ✓ Reminder sent and DEACTIVATED (one-time execution)`
+          );
           console.log(
             `[Cron] ✓ Created execution record for ${reminder.phone}`
           );
@@ -100,6 +142,7 @@ export async function GET(req: NextRequest) {
             type: "reminder",
             status: "sent",
             phone: reminder.phone,
+            message: "One-time reminder sent and deactivated",
           });
         } else {
           console.error(
