@@ -74,23 +74,37 @@ export async function GET(req: NextRequest) {
     try {
       // ============================================================
       // ONE-TIME EXECUTION CHECK:
-      // Check if this reminder has EVER been executed (not just today)
+      // Check if this reminder has been executed AND flow is complete
       // ============================================================
       const anyExecution = await ReminderExecution.findOne({
         reminderId: reminder._id,
       });
 
       if (anyExecution) {
-        // This reminder was already sent before - it's a ONE-TIME reminder
-        // Deactivate it so it doesn't appear in future cron runs
-        if (reminder.isActive) {
-          reminder.isActive = false;
-          await reminder.save();
+        // Check if the flow is COMPLETE (follow-up done or cancelled)
+        const flowComplete =
+          anyExecution.followUpStatus === "sent" ||
+          anyExecution.followUpStatus === "cancelled_by_user" ||
+          anyExecution.followUpStatus === "replied_before_followup" ||
+          anyExecution.followUpStatus === "skipped";
+
+        if (flowComplete) {
+          // Flow is complete - deactivate the reminder
+          if (reminder.isActive) {
+            reminder.isActive = false;
+            await reminder.save();
+            console.log(
+              `[Cron] ⚡ Deactivated reminder ${reminder._id} (flow complete: ${anyExecution.followUpStatus})`
+            );
+          }
+          continue;
+        } else {
+          // Execution exists but flow NOT complete (waiting for follow-up)
           console.log(
-            `[Cron] ⚡ Deactivated reminder ${reminder._id} (already executed once)`
+            `[Cron] ℹ️  Reminder ${reminder._id} already sent, waiting for follow-up (status: ${anyExecution.followUpStatus})`
           );
+          continue; // Skip sending again, but keep active for follow-up
         }
-        continue;
       }
 
       const reminderMinutes = getMinutesFromMidnight(reminder.reminderTime);
@@ -231,10 +245,15 @@ export async function GET(req: NextRequest) {
 
       const config = execution.reminderId as any;
 
-      if (!config || !config.isActive) {
-        console.log(`[Cron] ✓ SKIP - Config deleted or inactive`);
+      if (!config) {
+        console.log(`[Cron] ✓ SKIP - Config deleted`);
         continue;
       }
+
+      // NOTE: We do NOT check config.isActive here because:
+      // - ReminderExecution status is the source of truth
+      // - execution.status and execution.followUpStatus tell us everything
+      // - Checking config.isActive can block valid follow-ups
 
       // FAILSAFE: Check Message Logs
       console.log(`[Cron] Checking message logs for replies...`);
