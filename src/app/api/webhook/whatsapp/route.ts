@@ -140,6 +140,14 @@ export async function POST(req: NextRequest) {
             matched.replyReceivedAt = new Date();
             await matched.save();
 
+            // Deactivate the reminder - user replied, flow complete
+            const reminder = await Reminder.findById(matched.reminderId);
+            if (reminder && reminder.isActive) {
+              reminder.isActive = false;
+              await reminder.save();
+              console.log(`[Webhook] ⚡ Reminder deactivated (user replied)`);
+            }
+
             console.log(`[Webhook] ✓ Marked as replied - follow-up cancelled`);
           }
         }
@@ -179,6 +187,19 @@ async function directBlockFollowup(phone: string) {
     console.log(`[Webhook] ✓ Direct block completed - ${blocked} executions`);
 
     if (blocked > 0) {
+      // Deactivate all matching reminders
+      for (const exec of executions) {
+        const execDigits = exec.phone.replace(/\D/g, "");
+        if (execDigits.slice(-10) === phoneLast10) {
+          const reminder = await Reminder.findById(exec.reminderId);
+          if (reminder && reminder.isActive) {
+            reminder.isActive = false;
+            await reminder.save();
+            console.log(`[Webhook] ⚡ Reminder ${reminder._id} deactivated`);
+          }
+        }
+      }
+
       await sendWhatsAppMessage(
         phone,
         "✅ Completed! Great job. Follow-up cancelled."

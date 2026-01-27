@@ -6,19 +6,27 @@
  * HOW IT WORKS:
  * 1. Users create reminders with a phone number, message, time, and follow-up
  * 2. Each reminder executes EXACTLY ONCE when its scheduled time is reached
- * 3. After sending, the reminder is automatically deactivated (isActive = false)
- * 4. Users can create MULTIPLE reminders - each is independent
+ * 3. Reminder stays ACTIVE until the follow-up is processed
+ * 4. After follow-up is sent OR cancelled by user reply, isActive = false
+ * 5. Users can create MULTIPLE reminders - each is independent
  *
  * REPLY TRACKING:
  * - System watches for replies between reminder time and follow-up time
  * - If user replies before follow-up time, the follow-up is cancelled
  * - Status is updated to "replied" or "completed" in ReminderExecution
+ * - Reminder is deactivated immediately when user replies
  *
  * FOLLOW-UP LOGIC:
  * - Follow-ups only send if:
  *   a) Status is still "sent" (user hasn't replied)
  *   b) FollowUpStatus is "pending" (not cancelled)
  *   c) Current time >= follow-up time
+ *   d) Reminder is still active (isActive = true)
+ *
+ * DEACTIVATION TRIGGERS:
+ * - Follow-up sent successfully → isActive = false
+ * - User replied (follow-up cancelled) → isActive = false
+ * - No follow-up configured → isActive = false after initial send
  *
  * ============================================================
  */
@@ -122,16 +130,15 @@ export async function GET(req: NextRequest) {
           });
 
           // ============================================================
-          // ONE-TIME EXECUTION: Deactivate after sending
-          // This prevents it from being sent again tomorrow
+          // NOTE: We keep isActive=true here so follow-up can process
+          // The reminder will be deactivated after follow-up is sent/cancelled
           // ============================================================
           reminder.lastSentAt = new Date();
           reminder.dailyStatus = "sent";
-          reminder.isActive = false; // ⚡ KEY CHANGE: Deactivate after first send
           await reminder.save();
 
           console.log(
-            `[Cron] ✓ Reminder sent and DEACTIVATED (one-time execution)`
+            `[Cron] ✓ Initial reminder sent - keeping active for follow-up`
           );
           console.log(
             `[Cron] ✓ Created execution record for ${reminder.phone}`
@@ -142,7 +149,6 @@ export async function GET(req: NextRequest) {
             type: "reminder",
             status: "sent",
             phone: reminder.phone,
-            message: "One-time reminder sent and deactivated",
           });
         } else {
           console.error(
@@ -274,7 +280,12 @@ export async function GET(req: NextRequest) {
           execution.replyReceivedAt = matchedLog.createdAt;
           await execution.save();
 
+          // Deactivate the reminder - user replied, flow complete
+          config.isActive = false;
+          await config.save();
+
           console.log(`[Cron] ✓ SKIP - Auto-healed and cancelled follow-up`);
+          console.log(`[Cron] ⚡ Reminder deactivated (user replied)`);
           continue;
         } else {
           console.log(`[Cron] No matching reply found in logs`);
@@ -285,6 +296,12 @@ export async function GET(req: NextRequest) {
         console.log(`[Cron] ✓ SKIP - No follow-up time configured`);
         execution.followUpStatus = "skipped";
         await execution.save();
+
+        // Deactivate the reminder - no follow-up, flow complete
+        config.isActive = false;
+        await config.save();
+        console.log(`[Cron] ⚡ Reminder deactivated (no follow-up configured)`);
+
         continue;
       }
 
@@ -330,7 +347,15 @@ export async function GET(req: NextRequest) {
           execution.followUpSentAt = new Date();
           await execution.save();
 
+          // ============================================================
+          // ONE-TIME EXECUTION: Deactivate after follow-up sent
+          // The complete flow is now finished
+          // ============================================================
+          config.isActive = false;
+          await config.save();
+
           console.log(`[Cron] ✓ Follow-up SENT successfully`);
+          console.log(`[Cron] ⚡ Reminder DEACTIVATED (flow complete)`);
 
           results.push({
             id: execution._id,
