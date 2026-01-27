@@ -92,12 +92,18 @@ export async function POST(req: NextRequest) {
         followUpStatus: verified?.followUpStatus,
       });
 
-      // Also update Reminder model
+      // Also update Reminder model and deactivate
       if (exec.reminderId) {
-        await Reminder.findByIdAndUpdate(exec.reminderId, {
-          dailyStatus: "completed",
-          lastRepliedAt: new Date(),
-        });
+        const reminder = await Reminder.findByIdAndUpdate(
+          exec.reminderId,
+          {
+            dailyStatus: "completed",
+            lastRepliedAt: new Date(),
+            isActive: false, // ⚡ Deactivate - flow complete
+          },
+          { new: true }
+        );
+        console.log(`[Block] ⚡ Reminder ${exec.reminderId} deactivated`);
       }
     }
 

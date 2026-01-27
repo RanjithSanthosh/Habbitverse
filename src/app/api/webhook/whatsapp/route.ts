@@ -127,18 +127,39 @@ export async function POST(req: NextRequest) {
           const phoneDigits = from.replace(/\D/g, "");
           const phoneLast10 = phoneDigits.slice(-10);
 
+          console.log(
+            `[Webhook] Looking for execution - Date: ${todayStr}, Phone last 10: ${phoneLast10}`
+          );
+
           const executions = await ReminderExecution.find({ date: todayStr });
+          console.log(
+            `[Webhook] Found ${executions.length} total executions for today`
+          );
 
           const matched = executions.find((exec) => {
             const execDigits = exec.phone.replace(/\D/g, "");
-            return execDigits.slice(-10) === phoneLast10;
+            const execLast10 = execDigits.slice(-10);
+            console.log(
+              `[Webhook] Comparing ${execLast10} with ${phoneLast10}`
+            );
+            return execLast10 === phoneLast10;
           });
 
           if (matched) {
+            console.log(`[Webhook] ✓ MATCHED execution ID: ${matched._id}`);
+            console.log(
+              `[Webhook] Before update - Status: ${matched.status}, FollowUpStatus: ${matched.followUpStatus}`
+            );
+
             matched.status = "replied";
             matched.followUpStatus = "cancelled_by_user";
             matched.replyReceivedAt = new Date();
             await matched.save();
+
+            console.log(
+              `[Webhook] After update - Status: ${matched.status}, FollowUpStatus: ${matched.followUpStatus}`
+            );
+            console.log(`[Webhook] ⚡ DATABASE SAVED`);
 
             // Deactivate the reminder - user replied, flow complete
             const reminder = await Reminder.findById(matched.reminderId);
@@ -149,6 +170,10 @@ export async function POST(req: NextRequest) {
             }
 
             console.log(`[Webhook] ✓ Marked as replied - follow-up cancelled`);
+          } else {
+            console.log(
+              `[Webhook] ✗ NO MATCHING execution found for phone: ${from}`
+            );
           }
         }
       }
