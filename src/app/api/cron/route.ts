@@ -151,6 +151,12 @@ export async function GET(req: NextRequest) {
           reminder.dailyStatus = "sent";
           await reminder.save();
 
+          // Verify the reminder was updated
+          const verifiedReminder = await Reminder.findById(reminder._id);
+          console.log(
+            `[Cron] ✓ Reminder state verified - isActive: ${verifiedReminder?.isActive}, dailyStatus: ${verifiedReminder?.dailyStatus}`
+          );
+
           console.log(
             `[Cron] ✓ Initial reminder sent - keeping active for follow-up`
           );
@@ -306,12 +312,28 @@ export async function GET(req: NextRequest) {
           execution.replyReceivedAt = matchedLog.createdAt;
           await execution.save();
 
+          // Verify the save worked
+          const verifiedExecution = await ReminderExecution.findById(
+            execution._id
+          );
+          console.log(
+            `[Cron] ✓ Verified execution - followUpStatus: ${verifiedExecution?.followUpStatus}`
+          );
+
           // Deactivate the reminder - user replied, flow complete
-          config.isActive = false;
-          await config.save();
+          if (config) {
+            config.isActive = false;
+            config.dailyStatus = detectedStatus;
+            await config.save();
+
+            // Verify
+            const verifiedConfig = await Reminder.findById(config._id);
+            console.log(
+              `[Cron] ⚡ Reminder deactivated (auto-heal) - isActive: ${verifiedConfig?.isActive}`
+            );
+          }
 
           console.log(`[Cron] ✓ SKIP - Auto-healed and cancelled follow-up`);
-          console.log(`[Cron] ⚡ Reminder deactivated (user replied)`);
           continue;
         } else {
           console.log(`[Cron] No matching reply found in logs`);
@@ -323,10 +345,24 @@ export async function GET(req: NextRequest) {
         execution.followUpStatus = "skipped";
         await execution.save();
 
+        // Verify
+        const verifiedExecution = await ReminderExecution.findById(
+          execution._id
+        );
+        console.log(
+          `[Cron] ✓ Verified execution - followUpStatus: ${verifiedExecution?.followUpStatus}`
+        );
+
         // Deactivate the reminder - no follow-up, flow complete
         config.isActive = false;
+        config.dailyStatus = "completed";
         await config.save();
-        console.log(`[Cron] ⚡ Reminder deactivated (no follow-up configured)`);
+
+        // Verify
+        const verifiedConfig = await Reminder.findById(config._id);
+        console.log(
+          `[Cron] ⚡ Reminder deactivated (no follow-up) - isActive: ${verifiedConfig?.isActive}`
+        );
 
         continue;
       }
@@ -378,7 +414,14 @@ export async function GET(req: NextRequest) {
           // The complete flow is now finished
           // ============================================================
           config.isActive = false;
+          config.dailyStatus = "completed";
           await config.save();
+
+          // Verify deactivation
+          const verifiedConfig = await Reminder.findById(config._id);
+          console.log(
+            `[Cron] ✓ Verified - isActive: ${verifiedConfig?.isActive}, dailyStatus: ${verifiedConfig?.dailyStatus}`
+          );
 
           console.log(`[Cron] ✓ Follow-up SENT successfully`);
           console.log(`[Cron] ⚡ Reminder DEACTIVATED (flow complete)`);

@@ -162,29 +162,100 @@ export async function POST(req: NextRequest) {
               `[Webhook] Before update - Status: ${matched.status}, FollowUpStatus: ${matched.followUpStatus}`
             );
 
+            // Update execution fields
             matched.status = "replied";
             matched.followUpStatus = "cancelled_by_user";
             matched.replyReceivedAt = new Date();
-            await matched.save();
 
-            console.log(
-              `[Webhook] After update - Status: ${matched.status}, FollowUpStatus: ${matched.followUpStatus}`
-            );
-            console.log(`[Webhook] ⚡ DATABASE SAVED`);
+            // Save with error handling
+            try {
+              await matched.save();
+              console.log(`[Webhook] ⚡ EXECUTION SAVED TO DATABASE`);
 
-            // Deactivate the reminder - user replied, flow complete
-            const reminder = await Reminder.findById(matched.reminderId);
-            if (reminder && reminder.isActive) {
-              reminder.isActive = false;
-              await reminder.save();
-              console.log(`[Webhook] ⚡ Reminder deactivated (user replied)`);
+              // CRITICAL: Verify the save actually worked
+              const verified = await ReminderExecution.findById(matched._id);
+              if (verified) {
+                console.log(
+                  `[Webhook] ✓ VERIFIED - Status: ${verified.status}, FollowUpStatus: ${verified.followUpStatus}`
+                );
+
+                if (verified.followUpStatus !== "cancelled_by_user") {
+                  console.error(
+                    `[Webhook] ❌ CRITICAL: Database save FAILED - followUpStatus not updated!`
+                  );
+                  // Retry the save
+                  verified.status = "replied";
+                  verified.followUpStatus = "cancelled_by_user";
+                  verified.replyReceivedAt = new Date();
+                  await verified.save();
+                  console.log(`[Webhook] 🔄 RETRIED save operation`);
+                }
+              } else {
+                console.error(
+                  `[Webhook] ❌ CRITICAL: Could not verify execution save!`
+                );
+              }
+            } catch (saveError) {
+              console.error(`[Webhook] ❌ Error saving execution:`, saveError);
+              throw saveError; // Re-throw to trigger outer error handler
             }
 
-            console.log(`[Webhook] ✓ Marked as replied - follow-up cancelled`);
+            // Deactivate the reminder - user replied, flow complete
+            try {
+              const reminder = await Reminder.findById(matched.reminderId);
+              if (reminder && reminder.isActive) {
+                reminder.isActive = false;
+                reminder.dailyStatus = "replied";
+                reminder.lastRepliedAt = new Date();
+                await reminder.save();
+
+                // Verify reminder deactivation
+                const verifiedReminder = await Reminder.findById(
+                  matched.reminderId
+                );
+                console.log(
+                  `[Webhook] ⚡ Reminder deactivated - isActive: ${verifiedReminder?.isActive}`
+                );
+
+                if (verifiedReminder?.isActive) {
+                  console.error(
+                    `[Webhook] ❌ CRITICAL: Reminder deactivation FAILED!`
+                  );
+                  // Retry
+                  verifiedReminder.isActive = false;
+                  verifiedReminder.dailyStatus = "replied";
+                  await verifiedReminder.save();
+                  console.log(`[Webhook] 🔄 RETRIED reminder deactivation`);
+                }
+              }
+            } catch (reminderError) {
+              console.error(
+                `[Webhook] ❌ Error deactivating reminder:`,
+                reminderError
+              );
+              // Don't throw - execution update is more critical
+            }
+
+            console.log(
+              `[Webhook] ✅ COMPLETE - Reply processed and follow-up cancelled`
+            );
           } else {
             console.log(
               `[Webhook] ✗ NO MATCHING execution found for phone: ${from}`
             );
+            console.log(`[Webhook] Phone last 10 digits: ${phoneLast10}`);
+            console.log(`[Webhook] Executions checked: ${executions.length}`);
+            if (executions.length > 0) {
+              console.log(`[Webhook] Sample execution phones:`);
+              executions.slice(0, 3).forEach((exec) => {
+                const execDigits = exec.phone.replace(/\D/g, "");
+                console.log(
+                  `[Webhook]   - ${exec.phone} (last 10: ${execDigits.slice(
+                    -10
+                  )})`
+                );
+              });
+            }
           }
         }
       }
@@ -203,20 +274,40 @@ async function directBlockFollowup(phone: string) {
     const phoneDigits = phone.replace(/\D/g, "");
     const phoneLast10 = phoneDigits.slice(-10);
 
+    console.log(
+      `[Webhook] Direct block - Looking for executions on ${todayStr}`
+    );
     const executions = await ReminderExecution.find({ date: todayStr });
+    console.log(
+      `[Webhook] Direct block - Found ${executions.length} executions`
+    );
 
     let blocked = 0;
     for (const exec of executions) {
       const execDigits = exec.phone.replace(/\D/g, "");
       if (execDigits.slice(-10) === phoneLast10) {
         console.log(`[Webhook] Direct blocking execution ${exec._id}`);
+        console.log(
+          `[Webhook] Before: status=${exec.status}, followUp=${exec.followUpStatus}`
+        );
 
         exec.status = "completed";
         exec.followUpStatus = "cancelled_by_user";
         exec.replyReceivedAt = new Date();
         await exec.save();
 
-        blocked++;
+        // Verify the save
+        const verified = await ReminderExecution.findById(exec._id);
+        console.log(
+          `[Webhook] After: status=${verified?.status}, followUp=${verified?.followUpStatus}`
+        );
+
+        if (verified?.followUpStatus === "cancelled_by_user") {
+          blocked++;
+          console.log(`[Webhook] ✓ Execution ${exec._id} successfully blocked`);
+        } else {
+          console.error(`[Webhook] ❌ Failed to block execution ${exec._id}`);
+        }
       }
     }
 
@@ -229,9 +320,17 @@ async function directBlockFollowup(phone: string) {
         if (execDigits.slice(-10) === phoneLast10) {
           const reminder = await Reminder.findById(exec.reminderId);
           if (reminder && reminder.isActive) {
+            console.log(`[Webhook] Deactivating reminder ${reminder._id}`);
             reminder.isActive = false;
+            reminder.dailyStatus = "completed";
+            reminder.lastRepliedAt = new Date();
             await reminder.save();
-            console.log(`[Webhook] ⚡ Reminder ${reminder._id} deactivated`);
+
+            // Verify
+            const verifiedReminder = await Reminder.findById(reminder._id);
+            console.log(
+              `[Webhook] ⚡ Reminder ${reminder._id} deactivated - isActive: ${verifiedReminder?.isActive}`
+            );
           }
         }
       }
@@ -240,8 +339,11 @@ async function directBlockFollowup(phone: string) {
         phone,
         "✅ Completed! Great job. Follow-up cancelled."
       );
+    } else {
+      console.error(`[Webhook] ❌ No executions were blocked!`);
     }
   } catch (error) {
     console.error(`[Webhook] Direct block failed:`, error);
+    throw error; // Re-throw to notify caller
   }
 }

@@ -86,6 +86,16 @@ export async function POST(req: NextRequest) {
         `[Block] After: status=${verified?.status}, followUp=${verified?.followUpStatus}`
       );
 
+      // Double-check verification - retry if failed
+      if (verified?.followUpStatus !== "cancelled_by_user") {
+        console.error(`[Block] ❌ Save failed, retrying...`);
+        verified!.status = "completed";
+        verified!.followUpStatus = "cancelled_by_user";
+        verified!.replyReceivedAt = new Date();
+        await verified!.save();
+        console.log(`[Block] 🔄 Retry complete`);
+      }
+
       updated.push({
         id: exec._id.toString(),
         status: verified?.status,
@@ -103,7 +113,22 @@ export async function POST(req: NextRequest) {
           },
           { new: true }
         );
-        console.log(`[Block] ⚡ Reminder ${exec.reminderId} deactivated`);
+
+        // Verify reminder deactivation
+        const verifiedReminder = await Reminder.findById(exec.reminderId);
+        console.log(
+          `[Block] ⚡ Reminder ${exec.reminderId} deactivated - isActive: ${verifiedReminder?.isActive}`
+        );
+
+        // Retry if failed
+        if (verifiedReminder?.isActive) {
+          console.error(`[Block] ❌ Reminder deactivation failed, retrying...`);
+          verifiedReminder.isActive = false;
+          verifiedReminder.dailyStatus = "completed";
+          verifiedReminder.lastRepliedAt = new Date();
+          await verifiedReminder.save();
+          console.log(`[Block] 🔄 Reminder retry complete`);
+        }
       }
     }
 

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "verify-db": "node verify_database_state.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
