@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Trash2, Edit2, Clock, CheckCircle, AlertCircle, Phone, X, MessageCircle, ArrowRight, Check } from 'lucide-react';
+import { Plus, Trash2, Edit2, Clock, CheckCircle, AlertCircle, Phone, X, MessageCircle, ArrowRight, Check, RefreshCw } from 'lucide-react';
 import clsx from 'clsx';
 
 interface Reminder {
@@ -35,6 +35,8 @@ export default function Dashboard() {
         followUpTime: '09:00',
     });
     const [submitting, setSubmitting] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
+    const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
     // Stats
     const stats = {
@@ -45,22 +47,29 @@ export default function Dashboard() {
 
     const fetchReminders = async () => {
         try {
+            setRefreshing(true);
             const res = await fetch('/api/reminders');
             if (res.ok) {
                 const data = await res.json();
                 setReminders(data);
+                setLastUpdated(new Date());
             }
         } catch (error) {
             console.error('Error fetching reminders');
         } finally {
             setLoading(false);
+            setRefreshing(false);
         }
+    };
+
+    const handleManualRefresh = () => {
+        fetchReminders();
     };
 
     useEffect(() => {
         fetchReminders();
-        // Auto refresh every minute to see status updates
-        const interval = setInterval(fetchReminders, 60000);
+        // Auto refresh every 10 seconds to see status updates faster
+        const interval = setInterval(fetchReminders, 10000);
         return () => clearInterval(interval);
     }, []);
 
@@ -122,9 +131,16 @@ export default function Dashboard() {
                     <h1 className="text-3xl font-bold tracking-tight text-gray-900 bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-cyan-600 inline-block">
                         HabbitVerse Monitor
                     </h1>
-                    <p className="mt-1 text-gray-500">One-time reminders with smart follow-up tracking.</p>
+                    <div className="mt-1 flex items-center gap-3">
+                        <p className="text-gray-500">One-time reminders with smart follow-up tracking.</p>
+                        {lastUpdated && (
+                            <span className="text-xs text-gray-400">
+                                Last updated: {lastUpdated.toLocaleTimeString()}
+                            </span>
+                        )}
+                    </div>
                 </div>
-                <div className="flex items-center gap-6">
+                <div className="flex items-center gap-3">
                     <div className="flex gap-6 text-sm text-gray-500 mr-4">
                         <div className="flex flex-col items-center">
                             <span className="font-bold text-gray-900 text-lg">{stats.total}</span>
@@ -139,6 +155,15 @@ export default function Dashboard() {
                             <span>Completed</span>
                         </div>
                     </div>
+                    <button
+                        onClick={handleManualRefresh}
+                        disabled={refreshing}
+                        className="flex items-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 font-medium text-gray-700 transition hover:bg-gray-200 disabled:opacity-50"
+                        title="Refresh status"
+                    >
+                        <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
+                        {refreshing ? 'Refreshing...' : 'Refresh'}
+                    </button>
                     <button
                         onClick={() => setShowModal(true)}
                         className="flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 font-medium text-white shadow-md shadow-indigo-500/20 transition hover:bg-indigo-500"
