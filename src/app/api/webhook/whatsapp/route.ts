@@ -90,45 +90,100 @@ export async function POST(req: NextRequest) {
           console.log(`[Webhook] ⚠️  COMPLETION DETECTED - BLOCKING FOLLOW-UP`);
 
           try {
-            // Call the dedicated blocking endpoint
-            const blockResponse = await fetch(
-              `${
-                process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
-              }/api/block-followup`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ phone: from }),
-              }
+            // DIRECT DATABASE UPDATE - More reliable than internal API call
+            const todayStr = getISTDate();
+            const phoneDigits = from.replace(/\D/g, "");
+            const phoneLast10 = phoneDigits.slice(-10);
+
+            console.log(
+              `[Webhook] Direct block - Looking for executions on ${todayStr}`
+            );
+            console.log(`[Webhook] Phone last 10: ${phoneLast10}`);
+
+            const executions = await ReminderExecution.find({ date: todayStr });
+            console.log(
+              `[Webhook] Found ${executions.length} total executions for today`
             );
 
-            const blockResult = await blockResponse.json();
+            let blocked = 0;
+            for (const exec of executions) {
+              const execDigits = exec.phone.replace(/\D/g, "");
+              const execLast10 = execDigits.slice(-10);
 
-            console.log(`[Webhook] Block result:`, blockResult);
-
-            if (blockResult.success) {
               console.log(
-                `[Webhook] ✓ FOLLOW-UP BLOCKED - ${blockResult.blocked} executions updated`
+                `[Webhook] Comparing execution phone ${execLast10} with ${phoneLast10}`
               );
 
+              if (execLast10 === phoneLast10) {
+                console.log(
+                  `[Webhook] ✓ MATCH FOUND - Blocking execution ${exec._id}`
+                );
+                console.log(
+                  `[Webhook] Before: status=${exec.status}, followUp=${exec.followUpStatus}`
+                );
+
+                exec.status = "completed";
+                exec.followUpStatus = "cancelled_by_user";
+                exec.replyReceivedAt = new Date();
+                await exec.save();
+
+                // Verify the save
+                const verified = await ReminderExecution.findById(exec._id);
+                console.log(
+                  `[Webhook] After: status=${verified?.status}, followUp=${verified?.followUpStatus}`
+                );
+
+                if (verified?.followUpStatus === "cancelled_by_user") {
+                  blocked++;
+                  console.log(
+                    `[Webhook] ✓ Execution ${exec._id} successfully blocked`
+                  );
+
+                  // Also deactivate the reminder
+                  const reminder = await Reminder.findById(exec.reminderId);
+                  if (reminder && reminder.isActive) {
+                    console.log(
+                      `[Webhook] Deactivating reminder ${reminder._id}`
+                    );
+                    reminder.isActive = false;
+                    reminder.dailyStatus = "completed";
+                    reminder.lastRepliedAt = new Date();
+                    await reminder.save();
+
+                    // Verify
+                    const verifiedReminder = await Reminder.findById(
+                      reminder._id
+                    );
+                    console.log(
+                      `[Webhook] ⚡ Reminder ${reminder._id} deactivated - isActive: ${verifiedReminder?.isActive}`
+                    );
+                  }
+                } else {
+                  console.error(
+                    `[Webhook] ❌ Failed to block execution ${exec._id}`
+                  );
+                }
+              }
+            }
+
+            console.log(`[Webhook] ✓ Blocked ${blocked} execution(s)`);
+
+            if (blocked > 0) {
               // Send confirmation
               await sendWhatsAppMessage(
                 from,
                 "✅ Completed! Great job. Follow-up cancelled."
               );
+              console.log(
+                `[Webhook] ✅ COMPLETION CONFIRMED - ${blocked} follow-ups blocked`
+              );
             } else {
-              console.error(`[Webhook] ✗ Block failed:`, blockResult.error);
-
-              // Fallback: Try direct database update
-              console.log(`[Webhook] Attempting direct database update...`);
-              await directBlockFollowup(from);
+              console.error(
+                `[Webhook] ⚠️  WARNING: No executions were blocked!`
+              );
             }
           } catch (error) {
-            console.error(`[Webhook] ✗ Error calling block endpoint:`, error);
-
-            // Fallback: Direct database update
-            console.log(`[Webhook] Attempting direct database update...`);
-            await directBlockFollowup(from);
+            console.error(`[Webhook] ❌ Error blocking follow-up:`, error);
           }
         } else {
           // Regular reply (not completion)
