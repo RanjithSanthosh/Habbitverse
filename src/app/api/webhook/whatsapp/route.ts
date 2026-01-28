@@ -206,9 +206,37 @@ export async function POST(req: NextRequest) {
       }
 
       return NextResponse.json({ success: true, processed: processedCount });
-    } else if (body.entry?.[0]?.changes?.[0]?.value?.statuses) {
-      // Handle status updates (delivered, read, etc) - just log/ignore
-      return NextResponse.json({ success: true, type: "status_update" });
+    } else if (body.entry?.[0]?.changes?.[0]?.value?.statuses?.[0]) {
+      // HANDLE STATUS UPDATES (Sent, Delivered, Read, Failed)
+      const statusObj = body.entry[0].changes[0].value.statuses[0];
+      const status = statusObj.status; // sent, delivered, read, failed
+      const phone = statusObj.recipient_id; // e.g. "916369879920"
+      const wamid = statusObj.id;
+
+      console.log(
+        `[Webhook] 📩 Status Update: ${status.toUpperCase()} for ${phone}`
+      );
+
+      // Log to Database for visibility
+      try {
+        await MessageLog.create({
+          phone: phone,
+          direction: "inbound", // Technical inbound event
+          messageType: "status_update",
+          content: `Status: ${status}`,
+          status: status,
+          rawResponse: statusObj,
+        });
+        console.log(`[Webhook] ✓ Status logged to DB`);
+      } catch (err) {
+        console.error(`[Webhook] Failed to log status:`, err);
+      }
+
+      return NextResponse.json({
+        success: true,
+        type: "status_update",
+        status,
+      });
     }
 
     return NextResponse.json({ success: true, ignored: true });

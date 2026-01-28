@@ -58,13 +58,10 @@ async function inspect() {
       console.log('-----------------------------------');
     });
 
-    // 3. Check Message Logs (Inbound)
-    console.log('\n--- INBOUND MESSAGE LOGS (Last 5) ---');
+    // 3. Check Message Logs (Global Last 5)
+    console.log('\n--- ALL MESSAGE LOGS (Last 5 Global) ---');
     const logs = await db.collection('messagelogs')
-      .find({ 
-        phone: { $regex: `${phoneArg}$` },
-        direction: 'inbound'
-      })
+      .find({})
       .sort({ createdAt: -1 })
       .limit(5)
       .toArray();
