@@ -58,11 +58,18 @@ export async function GET(req: NextRequest) {
           doc.replyText = r.replyText || "Replied";
         }
       } else {
-        // No execution today -> It's Pending or Skipped
-        doc.dailyStatus = "pending";
-        doc.lastSentAt = undefined;
-        doc.followUpSent = false;
-        doc.replyText = undefined;
+        // No execution today
+        // fallback: If Reminder says completed/replied today, respect it
+        // This handles cases where execution might be missing due to race conditions or manual updates
+        if (doc.dailyStatus === "completed" || doc.dailyStatus === "replied") {
+          // keep existing status as it's terminal
+          // ensure we don't show it as pending
+        } else {
+          doc.dailyStatus = "pending";
+          doc.lastSentAt = undefined;
+          doc.followUpSent = false;
+          doc.replyText = undefined;
+        }
       }
       return doc;
     });

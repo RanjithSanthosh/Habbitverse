@@ -6,6 +6,11 @@ import MessageLog from "@/models/MessageLog";
 import { getISTDate } from "@/lib/dateUtils";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
 
+// Helper to normalize phone for comparison (last 10 digits)
+function getPhoneLast10(phone: string): string {
+  return phone.replace(/\D/g, "").slice(-10);
+}
+
 // GET request for Webhook Verification
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -29,376 +34,189 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    console.log("[Webhook] Received message");
+    console.log("[Webhook] Payload Received:", JSON.stringify(body, null, 2));
 
-    if (body.object) {
-      if (body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
-        const message = body.entry[0].changes[0].value.messages[0];
-        const from = message.from;
+    await dbConnect();
 
-        let text = "";
-        let isButtonReply = false;
+    // Check if it's a message
+    if (body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
+      const message = body.entry[0].changes[0].value.messages[0];
+      const from = message.from; // Sender's phone number
+      const messageId = message.id;
 
-        if (message.type === "text") {
-          text = message.text.body;
-        } else if (message.type === "interactive") {
-          const interactive = message.interactive;
-          if (interactive.type === "button_reply") {
-            text = interactive.button_reply.id;
-            isButtonReply = true;
-          }
+      let text = "";
+      let messageType = message.type;
+
+      // Extract text based on message type
+      if (messageType === "text") {
+        text = message.text.body;
+      } else if (messageType === "interactive") {
+        const interactive = message.interactive;
+        if (interactive.type === "button_reply") {
+          text = interactive.button_reply.id;
+          messageType = "button_reply"; // normalize type for our logs
+        } else if (interactive.type === "list_reply") {
+          text = interactive.list_reply.id;
+          messageType = "list_reply";
         }
+      }
 
-        await dbConnect();
+      console.log(`[Webhook] Processing Message from ${from}: "${text}"`);
 
-        // Log the message
+      // 1. Log Inbound Message
+      try {
         await MessageLog.create({
           phone: from,
           direction: "inbound",
-          messageType: "reply",
-          content: text,
+          messageType: messageType,
+          content: text || "[No Content]",
           status: "received",
-          rawResponse: body,
+          rawResponse: message,
         });
+        console.log(`[Webhook] ✓ Logged to MessageLog`);
+      } catch (logErr) {
+        console.error(`[Webhook] ❌ Logging failed:`, logErr);
+      }
 
-        console.log(`[Webhook] >>> MESSAGE RECEIVED <<<`);
-        console.log(`[Webhook] From: ${from}`);
-        console.log(`[Webhook] Text: "${text}"`);
-        console.log(`[Webhook] Text Length: ${text.length}`);
-        console.log(`[Webhook] Button: ${isButtonReply}`);
+      // 2. Detect Completion Intent
+      const normalizedText = (text || "").trim().toLowerCase();
+      const isCompletion =
+        normalizedText === "completed_habit" ||
+        normalizedText === "completed" ||
+        normalizedText === "complete" ||
+        normalizedText === "done" ||
+        normalizedText.startsWith("yes") ||
+        normalizedText.includes("complete") ||
+        normalizedText.includes("done");
 
-        // ================================================================
-        // IMMEDIATE BLOCKING FUNCTION
-        // When user clicks "Completed", we DIRECTLY block the follow-up
-        // ================================================================
+      console.log(`[Webhook] Is Completion? ${isCompletion}`);
 
-        // Normalize text: trim whitespace and convert to lowercase
-        const normalizedText = text.trim().toLowerCase();
-        console.log(`[Webhook] Normalized Text: "${normalizedText}"`);
+      // 3. Find and Update Executions
+      const todayStr = getISTDate();
+      const phoneLast10 = getPhoneLast10(from);
 
-        const isCompletion =
-          text === "completed_habit" || // Button ID (exact match)
-          normalizedText === "completed" ||
-          normalizedText === "complete" ||
-          normalizedText === "done" ||
-          normalizedText.includes("complete") ||
-          normalizedText.includes("done");
+      console.log(
+        `[Webhook] Searching executions for date=${todayStr}, phone=...${phoneLast10}`
+      );
 
-        console.log(`[Webhook] isCompletion: ${isCompletion}`);
+      // Find all executions for today that match this phone number
+      const executions = await ReminderExecution.find({
+        date: todayStr,
+        phone: { $regex: `${phoneLast10}$` },
+      });
 
-        if (isCompletion) {
-          console.log(`[Webhook] ⚠️  COMPLETION DETECTED - BLOCKING FOLLOW-UP`);
+      console.log(`[Webhook] Found ${executions.length} matching executions.`);
 
-          try {
-            // DIRECT DATABASE UPDATE - More reliable than internal API call
-            const todayStr = getISTDate();
-            const phoneDigits = from.replace(/\D/g, "");
-            const phoneLast10 = phoneDigits.slice(-10);
+      let processedCount = 0;
 
-            console.log(
-              `[Webhook] Direct block - Looking for executions on ${todayStr}`
+      if (executions.length > 0) {
+        for (const exec of executions) {
+          console.log(
+            `[Webhook] Updating Execution ${exec._id} (Current: ${exec.status})`
+          );
+
+          // Determine new status
+          const newStatus = isCompletion ? "completed" : "replied";
+          const newFollowUp = "cancelled_by_user"; // Stop follow-ups regardless of content
+
+          // Update Execution
+          exec.status = newStatus;
+          exec.followUpStatus = newFollowUp;
+          exec.replyReceivedAt = new Date();
+          await exec.save();
+
+          // Verify Execution Update
+          const verifiedExec = await ReminderExecution.findById(exec._id);
+          if (verifiedExec?.followUpStatus !== newFollowUp) {
+            console.error(
+              `[Webhook] ❌ Save verification failed for execution ${exec._id}, retrying...`
             );
-            console.log(`[Webhook] Phone last 10: ${phoneLast10}`);
+            verifiedExec!.followUpStatus = newFollowUp;
+            await verifiedExec!.save();
+          }
 
-            const executions = await ReminderExecution.find({ date: todayStr });
-            console.log(
-              `[Webhook] Found ${executions.length} total executions for today`
-            );
+          console.log(
+            `[Webhook] ✓ Execution ${exec._id} updated to ${newStatus}`
+          );
 
-            let blocked = 0;
-            for (const exec of executions) {
-              const execDigits = exec.phone.replace(/\D/g, "");
-              const execLast10 = execDigits.slice(-10);
-
-              console.log(
-                `[Webhook] Comparing execution phone ${execLast10} with ${phoneLast10}`
-              );
-
-              if (execLast10 === phoneLast10) {
-                console.log(
-                  `[Webhook] ✓ MATCH FOUND - Blocking execution ${exec._id}`
-                );
-                console.log(
-                  `[Webhook] Before: status=${exec.status}, followUp=${exec.followUpStatus}`
-                );
-
-                exec.status = "completed";
-                exec.followUpStatus = "cancelled_by_user";
-                exec.replyReceivedAt = new Date();
-                await exec.save();
-
-                // Verify the save
-                const verified = await ReminderExecution.findById(exec._id);
-                console.log(
-                  `[Webhook] After: status=${verified?.status}, followUp=${verified?.followUpStatus}`
-                );
-
-                if (verified?.followUpStatus === "cancelled_by_user") {
-                  blocked++;
-                  console.log(
-                    `[Webhook] ✓ Execution ${exec._id} successfully blocked`
-                  );
-
-                  // Also deactivate the reminder
-                  const reminder = await Reminder.findById(exec.reminderId);
-                  if (reminder && reminder.isActive) {
-                    console.log(
-                      `[Webhook] Deactivating reminder ${reminder._id}`
-                    );
-                    reminder.isActive = false;
-                    reminder.dailyStatus = "completed";
-                    reminder.lastRepliedAt = new Date();
-                    await reminder.save();
-
-                    // Verify
-                    const verifiedReminder = await Reminder.findById(
-                      reminder._id
-                    );
-                    console.log(
-                      `[Webhook] ⚡ Reminder ${reminder._id} deactivated - isActive: ${verifiedReminder?.isActive}`
-                    );
-                  }
-                } else {
-                  console.error(
-                    `[Webhook] ❌ Failed to block execution ${exec._id}`
-                  );
-                }
-              }
+          // Update Parent Reminder
+          const reminder = await Reminder.findById(exec.reminderId);
+          if (reminder) {
+            reminder.isActive = false; // Stop the flow for today
+            reminder.dailyStatus = newStatus;
+            reminder.lastRepliedAt = new Date();
+            if (isCompletion) {
+              reminder.replyText = "Completed via WhatsApp";
             }
+            await reminder.save();
+            console.log(
+              `[Webhook] ✓ Reminder ${reminder._id} deactivated and marked ${newStatus}`
+            );
+          }
+          processedCount++;
+        }
 
-            console.log(`[Webhook] ✓ Blocked ${blocked} execution(s)`);
-
-            if (blocked > 0) {
-              // Send confirmation
+        // Send confirmation only if we actually updated something
+        if (processedCount > 0) {
+          // Confirm to user
+          try {
+            if (isCompletion) {
               await sendWhatsAppMessage(
                 from,
-                "✅ Completed! Great job. Follow-up cancelled."
-              );
-              console.log(
-                `[Webhook] ✅ COMPLETION CONFIRMED - ${blocked} follow-ups blocked`
-              );
-            } else {
-              console.error(
-                `[Webhook] ⚠️  WARNING: No executions were blocked!`
+                "✅ Awesome! Marked as completed."
               );
             }
-          } catch (error) {
-            console.error(`[Webhook] ❌ Error blocking follow-up:`, error);
-          }
-        } else {
-          // Regular reply (not completion)
-          console.log(`[Webhook] Regular reply received`);
-
-          const todayStr = getISTDate();
-          const phoneDigits = from.replace(/\D/g, "");
-          const phoneLast10 = phoneDigits.slice(-10);
-
-          console.log(
-            `[Webhook] Looking for execution - Date: ${todayStr}, Phone last 10: ${phoneLast10}`
-          );
-
-          const executions = await ReminderExecution.find({ date: todayStr });
-          console.log(
-            `[Webhook] Found ${executions.length} total executions for today`
-          );
-
-          const matched = executions.find((exec) => {
-            const execDigits = exec.phone.replace(/\D/g, "");
-            const execLast10 = execDigits.slice(-10);
-            console.log(
-              `[Webhook] Comparing ${execLast10} with ${phoneLast10}`
-            );
-            return execLast10 === phoneLast10;
-          });
-
-          if (matched) {
-            console.log(`[Webhook] ✓ MATCHED execution ID: ${matched._id}`);
-            console.log(
-              `[Webhook] Before update - Status: ${matched.status}, FollowUpStatus: ${matched.followUpStatus}`
-            );
-
-            // Update execution fields
-            matched.status = "replied";
-            matched.followUpStatus = "cancelled_by_user";
-            matched.replyReceivedAt = new Date();
-
-            // Save with error handling
-            try {
-              await matched.save();
-              console.log(`[Webhook] ⚡ EXECUTION SAVED TO DATABASE`);
-
-              // CRITICAL: Verify the save actually worked
-              const verified = await ReminderExecution.findById(matched._id);
-              if (verified) {
-                console.log(
-                  `[Webhook] ✓ VERIFIED - Status: ${verified.status}, FollowUpStatus: ${verified.followUpStatus}`
-                );
-
-                if (verified.followUpStatus !== "cancelled_by_user") {
-                  console.error(
-                    `[Webhook] ❌ CRITICAL: Database save FAILED - followUpStatus not updated!`
-                  );
-                  // Retry the save
-                  verified.status = "replied";
-                  verified.followUpStatus = "cancelled_by_user";
-                  verified.replyReceivedAt = new Date();
-                  await verified.save();
-                  console.log(`[Webhook] 🔄 RETRIED save operation`);
-                }
-              } else {
-                console.error(
-                  `[Webhook] ❌ CRITICAL: Could not verify execution save!`
-                );
-              }
-            } catch (saveError) {
-              console.error(`[Webhook] ❌ Error saving execution:`, saveError);
-              throw saveError; // Re-throw to trigger outer error handler
-            }
-
-            // Deactivate the reminder - user replied, flow complete
-            try {
-              const reminder = await Reminder.findById(matched.reminderId);
-              if (reminder && reminder.isActive) {
-                reminder.isActive = false;
-                reminder.dailyStatus = "replied";
-                reminder.lastRepliedAt = new Date();
-                await reminder.save();
-
-                // Verify reminder deactivation
-                const verifiedReminder = await Reminder.findById(
-                  matched.reminderId
-                );
-                console.log(
-                  `[Webhook] ⚡ Reminder deactivated - isActive: ${verifiedReminder?.isActive}`
-                );
-
-                if (verifiedReminder?.isActive) {
-                  console.error(
-                    `[Webhook] ❌ CRITICAL: Reminder deactivation FAILED!`
-                  );
-                  // Retry
-                  verifiedReminder.isActive = false;
-                  verifiedReminder.dailyStatus = "replied";
-                  await verifiedReminder.save();
-                  console.log(`[Webhook] 🔄 RETRIED reminder deactivation`);
-                }
-              }
-            } catch (reminderError) {
-              console.error(
-                `[Webhook] ❌ Error deactivating reminder:`,
-                reminderError
-              );
-              // Don't throw - execution update is more critical
-            }
-
-            console.log(
-              `[Webhook] ✅ COMPLETE - Reply processed and follow-up cancelled`
-            );
-          } else {
-            console.log(
-              `[Webhook] ✗ NO MATCHING execution found for phone: ${from}`
-            );
-            console.log(`[Webhook] Phone last 10 digits: ${phoneLast10}`);
-            console.log(`[Webhook] Executions checked: ${executions.length}`);
-            if (executions.length > 0) {
-              console.log(`[Webhook] Sample execution phones:`);
-              executions.slice(0, 3).forEach((exec) => {
-                const execDigits = exec.phone.replace(/\D/g, "");
-                console.log(
-                  `[Webhook]   - ${exec.phone} (last 10: ${execDigits.slice(
-                    -10
-                  )})`
-                );
-              });
-            }
+          } catch (msgErr) {
+            console.error(`[Webhook] Failed to send confirmation msg:`, msgErr);
           }
         }
-      }
-      return new NextResponse("EVENT_RECEIVED", { status: 200 });
-    }
-  } catch (error) {
-    console.error("[Webhook] ✗ ERROR:", error);
-    return new NextResponse("Internal Server Error", { status: 500 });
-  }
-}
-
-// Fallback function for direct blocking
-async function directBlockFollowup(phone: string) {
-  try {
-    const todayStr = getISTDate();
-    const phoneDigits = phone.replace(/\D/g, "");
-    const phoneLast10 = phoneDigits.slice(-10);
-
-    console.log(
-      `[Webhook] Direct block - Looking for executions on ${todayStr}`
-    );
-    const executions = await ReminderExecution.find({ date: todayStr });
-    console.log(
-      `[Webhook] Direct block - Found ${executions.length} executions`
-    );
-
-    let blocked = 0;
-    for (const exec of executions) {
-      const execDigits = exec.phone.replace(/\D/g, "");
-      if (execDigits.slice(-10) === phoneLast10) {
-        console.log(`[Webhook] Direct blocking execution ${exec._id}`);
+      } else {
         console.log(
-          `[Webhook] Before: status=${exec.status}, followUp=${exec.followUpStatus}`
+          `[Webhook] ⚠️ No executions found. Checking strictly active reminders as fallback...`
         );
 
-        exec.status = "completed";
-        exec.followUpStatus = "cancelled_by_user";
-        exec.replyReceivedAt = new Date();
-        await exec.save();
+        // Fallback: Check for ANY active reminder with this phone number
+        const activeReminders = await Reminder.find({
+          isActive: true,
+          phone: { $regex: `${phoneLast10}$` },
+        });
 
-        // Verify the save
-        const verified = await ReminderExecution.findById(exec._id);
         console.log(
-          `[Webhook] After: status=${verified?.status}, followUp=${verified?.followUpStatus}`
+          `[Webhook] Found ${activeReminders.length} active reminders as fallback.`
         );
 
-        if (verified?.followUpStatus === "cancelled_by_user") {
-          blocked++;
-          console.log(`[Webhook] ✓ Execution ${exec._id} successfully blocked`);
-        } else {
-          console.error(`[Webhook] ❌ Failed to block execution ${exec._id}`);
-        }
-      }
-    }
-
-    console.log(`[Webhook] ✓ Direct block completed - ${blocked} executions`);
-
-    if (blocked > 0) {
-      // Deactivate all matching reminders
-      for (const exec of executions) {
-        const execDigits = exec.phone.replace(/\D/g, "");
-        if (execDigits.slice(-10) === phoneLast10) {
-          const reminder = await Reminder.findById(exec.reminderId);
-          if (reminder && reminder.isActive) {
-            console.log(`[Webhook] Deactivating reminder ${reminder._id}`);
-            reminder.isActive = false;
-            reminder.dailyStatus = "completed";
-            reminder.lastRepliedAt = new Date();
-            await reminder.save();
-
-            // Verify
-            const verifiedReminder = await Reminder.findById(reminder._id);
+        if (activeReminders.length > 0) {
+          for (const r of activeReminders) {
+            const newStatus = isCompletion ? "completed" : "replied";
+            r.isActive = false;
+            r.dailyStatus = newStatus;
+            r.lastRepliedAt = new Date();
+            await r.save();
             console.log(
-              `[Webhook] ⚡ Reminder ${reminder._id} deactivated - isActive: ${verifiedReminder?.isActive}`
+              `[Webhook] ✓ Fallback: Reminder ${r._id} updated to ${newStatus}`
             );
+            processedCount++;
           }
+        } else {
+          // Check if maybe it was already completed?
+          console.log(
+            `[Webhook] No active work found. User might be replying late or incorrectly.`
+          );
         }
       }
 
-      await sendWhatsAppMessage(
-        phone,
-        "✅ Completed! Great job. Follow-up cancelled."
-      );
-    } else {
-      console.error(`[Webhook] ❌ No executions were blocked!`);
+      return NextResponse.json({ success: true, processed: processedCount });
+    } else if (body.entry?.[0]?.changes?.[0]?.value?.statuses) {
+      // Handle status updates (delivered, read, etc) - just log/ignore
+      return NextResponse.json({ success: true, type: "status_update" });
     }
+
+    return NextResponse.json({ success: true, ignored: true });
   } catch (error) {
-    console.error(`[Webhook] Direct block failed:`, error);
-    throw error; // Re-throw to notify caller
+    console.error("[Webhook] ❌ Error:", error);
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 }
+    );
   }
 }
