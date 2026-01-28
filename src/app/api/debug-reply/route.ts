@@ -7,7 +7,7 @@ import { getISTDate } from "@/lib/dateUtils";
 /**
  * DEBUG ENDPOINT
  * GET /api/debug-reply?phone=919876543210
- * 
+ *
  * This manually simulates a user reply to test if the database updates work
  */
 export async function GET(req: NextRequest) {
@@ -18,9 +18,13 @@ export async function GET(req: NextRequest) {
     const phone = searchParams.get("phone");
 
     if (!phone) {
-      return NextResponse.json({
-        error: "Phone parameter required. Example: /api/debug-reply?phone=919876543210"
-      }, { status: 400 });
+      return NextResponse.json(
+        {
+          error:
+            "Phone parameter required. Example: /api/debug-reply?phone=919876543210",
+        },
+        { status: 400 }
+      );
     }
 
     const todayStr = getISTDate();
@@ -39,7 +43,7 @@ export async function GET(req: NextRequest) {
     for (const exec of executions) {
       const execDigits = exec.phone.replace(/\D/g, "");
       const execLast10 = execDigits.slice(-10);
-      
+
       if (execLast10 === phoneLast10) {
         matched.push({
           id: exec._id,
@@ -69,20 +73,22 @@ export async function GET(req: NextRequest) {
       date: todayStr,
       executions: matched,
     });
-
   } catch (error) {
     console.error("[Debug] Error:", error);
-    return NextResponse.json({
-      error: "Failed to check status",
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Failed to check status",
+        details: error instanceof Error ? error.message : String(error),
+      },
+      { status: 500 }
+    );
   }
 }
 
 /**
  * POST /api/debug-reply
  * Body: { "phone": "919876543210" }
- * 
+ *
  * Manually mark an execution as replied (for testing)
  */
 export async function POST(req: NextRequest) {
@@ -93,9 +99,12 @@ export async function POST(req: NextRequest) {
     const { phone } = body;
 
     if (!phone) {
-      return NextResponse.json({
-        error: "Phone number required in request body"
-      }, { status: 400 });
+      return NextResponse.json(
+        {
+          error: "Phone number required in request body",
+        },
+        { status: 400 }
+      );
     }
 
     const todayStr = getISTDate();
@@ -110,10 +119,12 @@ export async function POST(req: NextRequest) {
     for (const exec of executions) {
       const execDigits = exec.phone.replace(/\D/g, "");
       const execLast10 = execDigits.slice(-10);
-      
+
       if (execLast10 === phoneLast10) {
         console.log(`[Debug] Updating execution ${exec._id}`);
-        console.log`[Debug] Before: status=${exec.status}, followUp=${exec.followUpStatus}`);
+        console.log(
+          `[Debug] Before: status=${exec.status}, followUp=${exec.followUpStatus}`
+        );
 
         exec.status = "replied";
         exec.followUpStatus = "cancelled_by_user";
@@ -122,7 +133,9 @@ export async function POST(req: NextRequest) {
 
         // Verify
         const verified = await ReminderExecution.findById(exec._id);
-        console.log(`[Debug] After: status=${verified?.status}, followUp=${verified?.followUpStatus}`);
+        console.log(
+          `[Debug] After: status=${verified?.status}, followUp=${verified?.followUpStatus}`
+        );
 
         if (verified?.followUpStatus === "cancelled_by_user") {
           updated++;
@@ -147,12 +160,14 @@ export async function POST(req: NextRequest) {
       date: todayStr,
       updated: updated,
     });
-
   } catch (error) {
     console.error("[Debug] Error:", error);
-    return NextResponse.json({
-      error: "Failed to update",
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Failed to update",
+        details: error instanceof Error ? error.message : String(error),
+      },
+      { status: 500 }
+    );
   }
 }
