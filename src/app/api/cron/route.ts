@@ -376,7 +376,7 @@ export async function GET(req: NextRequest) {
 
       // Check if follow-up time is reached
       if (nowMinutes >= followUpMinutes) {
-        // Sanity check
+        // Sanity check 1: Follow-up must be AFTER reminder time
         const reminderMinutes = getMinutesFromMidnight(config.reminderTime);
         if (followUpMinutes <= reminderMinutes) {
           console.warn(
@@ -384,6 +384,30 @@ export async function GET(req: NextRequest) {
           );
           continue;
         }
+
+        // Sanity check 2: Ensure initial message was sent at least 2 minutes ago
+        // This prevents follow-up from being sent immediately after initial send
+        const now = new Date();
+        const timeSinceSent = execution.sentAt
+          ? (now.getTime() - new Date(execution.sentAt).getTime()) / 1000 / 60
+          : 0;
+
+        const MIN_DELAY_MINUTES = 2;
+        if (timeSinceSent < MIN_DELAY_MINUTES) {
+          console.log(
+            `[Cron] ⏳ Waiting for minimum delay - ${timeSinceSent.toFixed(
+              1
+            )}min since sent (need ${MIN_DELAY_MINUTES}min)`
+          );
+          console.log(`[Cron] Will check again in next cron run`);
+          continue;
+        }
+
+        console.log(
+          `[Cron] ✓ Time check passed - ${timeSinceSent.toFixed(
+            1
+          )}min since initial send`
+        );
 
         console.log(`[Cron] >>> SENDING FOLLOW-UP <<<`);
         console.log(`[Cron] To: ${execution.phone}`);
