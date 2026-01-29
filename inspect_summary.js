@@ -22,20 +22,24 @@ async function inspectLast() {
             title: r.title, 
             phone: r.phone,
             status: r.dailyStatus,
-            active: r.isActive 
+            active: r.isActive,
+            remTime: r.reminderTime,
+            folTime: r.followUpTime
         },
-        executions: executions.map(e => ({
+        recentExecutions: (await db.collection('reminderexecutions').find({}).sort({ sentAt: -1 }).limit(5).toArray()).map(e => ({
             id: e._id,
+            remId: e.reminderId,
             status: e.status,
-            followUp: e.followUpStatus,
-            sent: e.sentAt,
-            reply: e.replyReceivedAt
+            time: e.sentAt
         })),
         recentLogs: logs.map(l => ({
             dir: l.direction,
             type: l.messageType,
             txt: l.content,
-            time: l.createdAt
+            status: l.status,
+            raw: l.rawResponse,
+            time: l.createdAt,
+            phone: l.phone
         }))
     };
 
