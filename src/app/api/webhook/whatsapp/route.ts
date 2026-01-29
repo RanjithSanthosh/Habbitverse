@@ -42,7 +42,6 @@ export async function POST(req: NextRequest) {
     if (body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
       const message = body.entry[0].changes[0].value.messages[0];
       const from = message.from; // Sender's phone number
-      const messageId = message.id;
 
       let text = "";
       let messageType = message.type;
@@ -86,122 +85,104 @@ export async function POST(req: NextRequest) {
         normalizedText === "complete" ||
         normalizedText === "done" ||
         normalizedText.startsWith("yes") ||
+        normalizedText.startsWith("yep") ||
         normalizedText.includes("complete") ||
         normalizedText.includes("done");
 
       console.log(`[Webhook] Is Completion? ${isCompletion}`);
 
-      // 3. Find and Update Executions
+      // 3. CORE LOGIC: Find Active Reminders & UPSERT Executions
       const todayStr = getISTDate();
       const phoneLast10 = getPhoneLast10(from);
 
       console.log(
-        `[Webhook] Searching executions for date=${todayStr}, phone=...${phoneLast10}`
+        `[Webhook] 🔍 Processing reply for phone ...${phoneLast10} on ${todayStr}`
       );
 
-      // Find all executions for today that match this phone number
-      const executions = await ReminderExecution.find({
-        date: todayStr,
-        phone: { $regex: `${phoneLast10}$` },
+      // STEP A: Find the Configuration (Reminder) first
+      // This is the anchor. We need the reminderId to create/update the execution correctly.
+      const activeReminders = await Reminder.find({
+        isActive: true,
+        phone: { $regex: `${phoneLast10}$` }, // Match last 10 digits
       });
 
-      console.log(`[Webhook] Found ${executions.length} matching executions.`);
+      console.log(
+        `[Webhook] Found ${activeReminders.length} active reminders for this phone.`
+      );
 
       let processedCount = 0;
 
-      if (executions.length > 0) {
-        for (const exec of executions) {
+      if (activeReminders.length === 0) {
+        // Edge case: Message received but no active reminder found.
+        // It could be a reply to an old/completed reminder.
+        console.log(
+          `[Webhook] ⚠️ No active reminders found. Reply ignored for flow logic.`
+        );
+      } else {
+        // STEP B: For every active reminder, UPSERT the execution
+        for (const reminder of activeReminders) {
           console.log(
-            `[Webhook] Updating Execution ${exec._id} (Current: ${exec.status})`
+            `[Webhook] 👉 Processing Reminder: ${reminder.title} (${reminder._id})`
           );
 
-          // Determine new status
+          // Determine statuses
           const newStatus = isCompletion ? "completed" : "replied";
-          const newFollowUp = "cancelled_by_user"; // Stop follow-ups regardless of content
+          const newFollowUp = "cancelled_by_user";
 
-          // Update Execution
-          exec.status = newStatus;
-          exec.followUpStatus = newFollowUp;
-          exec.replyReceivedAt = new Date();
-          await exec.save();
-
-          // Verify Execution Update
-          const verifiedExec = await ReminderExecution.findById(exec._id);
-          if (verifiedExec?.followUpStatus !== newFollowUp) {
-            console.error(
-              `[Webhook] ❌ Save verification failed for execution ${exec._id}, retrying...`
+          // UPSERT: Create or Update the Daily Record
+          // This is the CRITICAL FIX. We guarantee an execution record exists.
+          try {
+            const execution = await ReminderExecution.findOneAndUpdate(
+              {
+                reminderId: reminder._id,
+                date: todayStr,
+              },
+              {
+                $set: {
+                  phone: reminder.phone, // Ensure phone is set on create
+                  status: newStatus,
+                  followUpStatus: newFollowUp,
+                  replyReceivedAt: new Date(),
+                },
+                $setOnInsert: {
+                  sentAt: new Date(), // If created now, set a dummy sentAt so it looks valid
+                },
+              },
+              { upsert: true, new: true }
             );
-            verifiedExec!.followUpStatus = newFollowUp;
-            await verifiedExec!.save();
-          }
 
-          console.log(
-            `[Webhook] ✓ Execution ${exec._id} updated to ${newStatus}`
-          );
+            console.log(`[Webhook]    ✓ Execution upserted: ${execution._id}`);
+            console.log(
+              `[Webhook]    ✓ Status: ${execution.status}, FollowUp: ${execution.followUpStatus}`
+            );
 
-          // Update Parent Reminder
-          const reminder = await Reminder.findById(exec.reminderId);
-          if (reminder) {
-            reminder.isActive = false; // Stop the flow for today
+            // STEP C: Update the Configuration (Reminder)
+            // If completed or valid reply, we deactivate the reminder config
+            reminder.isActive = false;
             reminder.dailyStatus = newStatus;
             reminder.lastRepliedAt = new Date();
             if (isCompletion) {
               reminder.replyText = "Completed via WhatsApp";
             }
             await reminder.save();
-            console.log(
-              `[Webhook] ✓ Reminder ${reminder._id} deactivated and marked ${newStatus}`
+            console.log(`[Webhook]    ✓ Reminder deactivated`);
+
+            processedCount++;
+          } catch (upsertError) {
+            console.error(
+              `[Webhook] ❌ Error updating execution/reminder:`,
+              upsertError
             );
           }
-          processedCount++;
         }
 
-        // Send confirmation only if we actually updated something
-        if (processedCount > 0) {
-          // Confirm to user
+        // Send confirmation to user
+        if (processedCount > 0 && isCompletion) {
           try {
-            if (isCompletion) {
-              await sendWhatsAppMessage(
-                from,
-                "✅ Awesome! Marked as completed."
-              );
-            }
+            await sendWhatsAppMessage(from, "✅ Awesome! Marked as completed.");
           } catch (msgErr) {
             console.error(`[Webhook] Failed to send confirmation msg:`, msgErr);
           }
-        }
-      } else {
-        console.log(
-          `[Webhook] ⚠️ No executions found. Checking strictly active reminders as fallback...`
-        );
-
-        // Fallback: Check for ANY active reminder with this phone number
-        const activeReminders = await Reminder.find({
-          isActive: true,
-          phone: { $regex: `${phoneLast10}$` },
-        });
-
-        console.log(
-          `[Webhook] Found ${activeReminders.length} active reminders as fallback.`
-        );
-
-        if (activeReminders.length > 0) {
-          for (const r of activeReminders) {
-            const newStatus = isCompletion ? "completed" : "replied";
-            r.isActive = false;
-            r.dailyStatus = newStatus;
-            r.lastRepliedAt = new Date();
-            await r.save();
-            console.log(
-              `[Webhook] ✓ Fallback: Reminder ${r._id} updated to ${newStatus}`
-            );
-            processedCount++;
-          }
-        } else {
-          // Check if maybe it was already completed?
-          console.log(
-            `[Webhook] No active work found. User might be replying late or incorrectly.`
-          );
         }
       }
 
@@ -210,8 +191,7 @@ export async function POST(req: NextRequest) {
       // HANDLE STATUS UPDATES (Sent, Delivered, Read, Failed)
       const statusObj = body.entry[0].changes[0].value.statuses[0];
       const status = statusObj.status; // sent, delivered, read, failed
-      const phone = statusObj.recipient_id; // e.g. "916369879920"
-      const wamid = statusObj.id;
+      const phone = statusObj.recipient_id;
 
       console.log(
         `[Webhook] 📩 Status Update: ${status.toUpperCase()} for ${phone}`

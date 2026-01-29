@@ -249,6 +249,19 @@ export async function GET(req: NextRequest) {
         continue;
       }
 
+      // STRICT CHECK 3: Safety Guard - Check if reply timestamp exists
+      if (execution.replyReceivedAt) {
+        console.log(
+          `[Cron] ✓ SKIP - Reply received at ${execution.replyReceivedAt} (Safety Guard)`
+        );
+        // Self-healing: Update status if needed
+        if (execution.followUpStatus === "pending") {
+          execution.followUpStatus = "cancelled_by_user";
+          await execution.save();
+        }
+        continue;
+      }
+
       const config = execution.reminderId as any;
 
       if (!config) {
