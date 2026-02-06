@@ -54,8 +54,8 @@ export async function GET(req: NextRequest) {
 
   await dbConnect();
 
-  const nowTimeStr = getISTTime();
   const todayDateStr = getISTDate();
+  const nowTimeStr = getISTTime();
   const nowMinutes = getMinutesFromMidnight(nowTimeStr);
 
   console.log(`\n========================================`);

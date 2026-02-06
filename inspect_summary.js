@@ -32,7 +32,7 @@ async function inspectLast() {
             status: e.status,
             time: e.sentAt
         })),
-        recentLogs: logs.map(l => ({
+        /*recentLogs: logs.map(l => ({
             dir: l.direction,
             type: l.messageType,
             txt: l.content,
@@ -40,7 +40,7 @@ async function inspectLast() {
             raw: l.rawResponse,
             time: l.createdAt,
             phone: l.phone
-        }))
+        }))*/
     };
 
     console.log("___REPORT_START___");
