@@ -31,6 +31,10 @@ export async function GET(req: NextRequest) {
 }
 
 // POST request for Incoming Messages
+// Allow Vercel Function to run for up to 60 seconds (prevents DB timeouts)
+export const maxDuration = 60;
+
+// POST request for Incoming Messages
 export async function POST(req: NextRequest) {
   try {
     console.log("🔥 WEBHOOK HIT SUCCESSFULLY 🔥");
@@ -41,16 +45,16 @@ export async function POST(req: NextRequest) {
       return new NextResponse("Not Found", { status: 404 });
     }
 
-    try {
-      await dbConnect();
-    } catch (dbErr) {
-      console.error("[Webhook] DB Connection Failed:", dbErr);
-      // Still return 200 to Meta so they don't disable webhook
-      return new NextResponse("EVENT_RECEIVED", { status: 200 });
-    }
-
-    // A. Handle Messages (Replies)
+    // A. Handle Messages (Replies) - ONLY connect to DB for this
     if (body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
+      try {
+        await dbConnect();
+      } catch (dbErr) {
+        console.error("[Webhook] DB Connection Failed:", dbErr);
+        // Still return 200 to Meta so they don't disable webhook
+        return new NextResponse("EVENT_RECEIVED", { status: 200 });
+      }
+
       const message = body.entry[0].changes[0].value.messages[0];
       const from = message.from;
       let text = "";
@@ -148,25 +152,11 @@ export async function POST(req: NextRequest) {
         );
       }
     }
-    // B. Handle Status Updates
+    // B. Handle Status Updates (Skip DB for speed)
     else if (body.entry?.[0]?.changes?.[0]?.value?.statuses?.[0]) {
+      // Just log to console, skip DB to prevent timeouts
       const statusObj = body.entry[0].changes[0].value.statuses[0];
-      const status = statusObj.status;
-      const phone = statusObj.recipient_id;
-      // console.log(`[Webhook] 📩 Status Update: ${status} for ${phone}`);
-
-      try {
-        await MessageLog.create({
-          phone: phone,
-          direction: "system", // Use system for status updates
-          messageType: "status_update",
-          content: `Status: ${status}`,
-          status: status,
-          rawResponse: statusObj,
-        });
-      } catch (err) {
-        console.error(`[Webhook] Failed to log status:`, err);
-      }
+      // console.log(`[Webhook] Status Update: ${statusObj.status}`);
     }
 
     // Always 200 OK string
