@@ -6,12 +6,12 @@ async function checkRecent() {
   try {
     await client.connect();
     // 15:30 UTC = 21:00 IST approx
-    const cutoff = new Date(Date.now() - 15 * 60 * 1000); 
+    const timeThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 hours ago
     
-    console.log(`Checking logs since: ${cutoff.toISOString()}`);
+    console.log(`Checking logs since: ${timeThreshold.toISOString()}`);
 
     const logs = await client.db().collection('messagelogs')
-      .find({ createdAt: { $gt: cutoff } })
+      .find({ createdAt: { $gt: timeThreshold } })
       .sort({ createdAt: -1 })
       .toArray();
 
