@@ -118,6 +118,36 @@ export async function POST(req: NextRequest) {
       );
 
       for (const reminder of activeReminders) {
+        // --- STRICT TIME CHECK: Prevent Update if Past Follow-Up Time ---
+        // Get current time in IST HH:mm format for comparison
+        const now = new Date();
+        const currentISTTime = now.toLocaleTimeString("en-US", {
+          timeZone: "Asia/Kolkata",
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+
+        // Ensure robust comparison (e.g. handle "09:05" vs "9:05" if needed, assuming DB is HH:mm)
+        // String comparison works for 24h format: "23:00" > "19:00" is true.
+        // Edge Case: If followUpTime is "00:05" (next day) and now is "23:55" (prev day), logic fails.
+        // Assuming Reminder/FollowUp follow standard daily logic where FollowUp > Reminder Time on same day.
+
+        if (reminder.followUpTime && currentISTTime > reminder.followUpTime) {
+          console.log(
+            `[Webhook] ⚠️ Reply received AFTER Follow-Up Time (${currentISTTime} > ${reminder.followUpTime}). Ignoring Update.`,
+          );
+
+          // Optional: Notify user they are late?
+          if (isCompletion) {
+            await sendWhatsAppMessage(
+              from,
+              `⏳ It's past the time limit (${reminder.followUpTime}) for this habit. Status not updated.`,
+            );
+          }
+          continue; // Skip processing this reminder
+        }
+
         const newStatus = isCompletion ? "completed" : "replied";
 
         const execution = await ReminderExecution.findOneAndUpdate(
