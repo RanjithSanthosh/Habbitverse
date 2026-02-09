@@ -19,6 +19,7 @@ interface Reminder {
     replyText?: string;
     lastSentAt?: string;
     followUpSent?: boolean;
+    createdAt?: string;
 }
 
 
@@ -38,11 +39,35 @@ export default function Dashboard() {
     const [refreshing, setRefreshing] = useState(false);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-    // Stats
+    // Filtering State
+    const [filterType, setFilterType] = useState<'all' | 'today' | 'date'>('today');
+    const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0]);
+
+    // Computed Filtered Reminders
+    const filteredReminders = reminders.filter(r => {
+        if (filterType === 'all') return true;
+
+        // Convert Reminder Creation Time to IST YYYY-MM-DD
+        const createdDate = r.createdAt
+            ? new Date(r.createdAt).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+            : new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // Fallback
+
+        if (filterType === 'today') {
+            const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+            return createdDate === today;
+        }
+
+        if (filterType === 'date') {
+            return createdDate === filterDate;
+        }
+        return true;
+    });
+
+    // Stats based on Filtered Data or Total? usually Total stats are useful globally, but let's show Filtered Stats
     const stats = {
-        total: reminders.length,
-        active: reminders.filter(r => r.isActive).length,
-        completed: reminders.filter(r => r.dailyStatus === 'completed' || r.dailyStatus === 'replied').length,
+        total: filteredReminders.length,
+        active: filteredReminders.filter(r => r.isActive).length,
+        completed: filteredReminders.filter(r => r.dailyStatus === 'completed' || r.dailyStatus === 'replied').length,
     };
 
     const fetchReminders = async () => {
@@ -126,65 +151,93 @@ export default function Dashboard() {
     return (
         <div className="min-h-screen bg-gray-50 px-4 py-8 font-sans text-gray-900 md:px-8">
             {/* Header */}
-            <header className="mb-10 flex flex-col justify-between gap-4 md:flex-row md:items-center">
+            <header className="mb-8 flex flex-col justify-between gap-6 md:flex-row md:items-end">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight text-gray-900 bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-cyan-600 inline-block">
                         HabbitVerse Monitor
                     </h1>
-                    <div className="mt-1 flex items-center gap-3">
+                    <div className="mt-2 flex items-center gap-3">
                         <p className="text-gray-500">One-time reminders with smart follow-up tracking.</p>
                         {lastUpdated && (
-                            <span className="text-xs text-gray-400">
-                                Last updated: {lastUpdated.toLocaleTimeString()}
+                            <span className="text-xs text-gray-400 border-l pl-3 ml-2 border-gray-300">
+                                Updated: {lastUpdated.toLocaleTimeString()}
                             </span>
                         )}
                     </div>
                 </div>
-                <div className="flex items-center gap-3">
-                    <div className="flex gap-6 text-sm text-gray-500 mr-4">
-                        <div className="flex flex-col items-center">
-                            <span className="font-bold text-gray-900 text-lg">{stats.total}</span>
-                            <span>Total</span>
-                        </div>
-                        <div className="flex flex-col items-center">
-                            <span className="font-bold text-green-600 text-lg">{stats.active}</span>
-                            <span>Active</span>
-                        </div>
-                        <div className="flex flex-col items-center">
-                            <span className="font-bold text-indigo-600 text-lg">{stats.completed}</span>
-                            <span>Completed</span>
+
+                {/* Controls & Filter */}
+                <div className="flex flex-col items-end gap-3">
+
+                    {/* Filter Bar */}
+                    <div className="flex items-center bg-white p-1 rounded-lg border border-gray-200 shadow-sm">
+                        <button
+                            onClick={() => setFilterType('all')}
+                            className={clsx("px-3 py-1.5 text-sm font-medium rounded-md transition-colors", filterType === 'all' ? "bg-indigo-100 text-indigo-700" : "text-gray-600 hover:bg-gray-50")}
+                        >
+                            All
+                        </button>
+                        <button
+                            onClick={() => setFilterType('today')}
+                            className={clsx("px-3 py-1.5 text-sm font-medium rounded-md transition-colors", filterType === 'today' ? "bg-indigo-100 text-indigo-700" : "text-gray-600 hover:bg-gray-50")}
+                        >
+                            Today
+                        </button>
+                        <div className="flex items-center border-l pl-2 ml-2 border-gray-200">
+                            <input
+                                type="date"
+                                value={filterDate}
+                                onChange={(e) => {
+                                    setFilterDate(e.target.value);
+                                    setFilterType('date');
+                                }}
+                                className={clsx(
+                                    "text-sm p-1 border rounded focus:outline-none focus:ring-1 focus:ring-indigo-500",
+                                    filterType === 'date' ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600"
+                                )}
+                            />
                         </div>
                     </div>
-                    <button
-                        onClick={handleManualRefresh}
-                        disabled={refreshing}
-                        className="flex items-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 font-medium text-gray-700 transition hover:bg-gray-200 disabled:opacity-50"
-                        title="Refresh status"
-                    >
-                        <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
-                        {refreshing ? 'Refreshing...' : 'Refresh'}
-                    </button>
-                    <button
-                        onClick={() => setShowModal(true)}
-                        className="flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 font-medium text-white shadow-md shadow-indigo-500/20 transition hover:bg-indigo-500"
-                    >
-                        <Plus size={18} /> New Reminder
-                    </button>
+
+                    <div className="flex items-center gap-3">
+                        {/* Stats Summary */}
+                        <div className="flex gap-4 text-xs font-semibold uppercase tracking-wide text-gray-500 mr-4">
+                            <span title="Total in view">Total: <span className="text-gray-900">{stats.total}</span></span>
+                            <span title="Pending execution" className="text-green-600">Active: {stats.active}</span>
+                            <span title="Finished" className="text-indigo-600">Done: {stats.completed}</span>
+                        </div>
+
+                        <button
+                            onClick={handleManualRefresh}
+                            disabled={refreshing}
+                            className="p-2 text-gray-500 hover:text-indigo-600 transition"
+                            title="Refresh Data"
+                        >
+                            <RefreshCw size={20} className={refreshing ? 'animate-spin' : ''} />
+                        </button>
+
+                        <button
+                            onClick={() => setShowModal(true)}
+                            className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white shadow-md shadow-indigo-500/20 transition hover:bg-indigo-500"
+                        >
+                            <Plus size={18} /> New
+                        </button>
+                    </div>
                 </div>
             </header>
 
             {/* Grid */}
             {loading ? (
                 <div className="flex justify-center p-20 text-indigo-500 animate-pulse">Loading reminders...</div>
-            ) : reminders.length === 0 ? (
+            ) : filteredReminders.length === 0 ? (
                 <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white">
-                    <p className="text-gray-400">No reminders found.</p>
-                    <p className="text-xs text-gray-400 mt-2">Each reminder executes once with smart follow-up</p>
-                    <button onClick={() => setShowModal(true)} className="mt-4 text-indigo-500 hover:text-indigo-600 font-medium">Create your first reminder</button>
+                    <p className="text-gray-400">No reminders found for this filter.</p>
+                    <p className="text-xs text-gray-400 mt-2">Try changing the filter or create a new one.</p>
+                    <button onClick={() => setShowModal(true)} className="mt-4 text-indigo-500 hover:text-indigo-600 font-medium">Create Reminder</button>
                 </div>
             ) : (
                 <div className="grid gap-6 sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
-                    {reminders.map((reminder) => (
+                    {filteredReminders.map((reminder) => (
                         <div key={reminder._id} className={clsx(
                             "group relative flex flex-col justify-between rounded-xl border p-6 transition-all hover:shadow-lg bg-white",
                             reminder.isActive ? "border-gray-200" : "border-gray-200 opacity-60 bg-gray-50"
@@ -196,6 +249,12 @@ export default function Dashboard() {
                                         <h3 className="text-lg font-bold text-gray-900">{reminder.title}</h3>
                                         {!reminder.isActive && (
                                             <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-gray-200 text-gray-600 uppercase">Executed</span>
+                                        )}
+                                        {/* Show Date if filtered by All */}
+                                        {filterType === 'all' && reminder.createdAt && (
+                                            <span className="text-[10px] text-gray-400">
+                                                {new Date(reminder.createdAt).toLocaleDateString("en-IN", { day: 'numeric', month: 'short' })}
+                                            </span>
                                         )}
                                     </div>
                                     <div className="mt-1 flex items-center gap-2 text-sm text-gray-500">
@@ -256,16 +315,20 @@ export default function Dashboard() {
                                             "h-6 w-6 rounded-full flex items-center justify-center border-2 border-white shadow-sm transition-colors",
                                             reminder.dailyStatus === 'completed' ? "bg-green-500 text-white" :
                                                 reminder.dailyStatus === 'replied' ? "bg-blue-500 text-white" :
-                                                    "bg-gray-200 text-gray-400"
+                                                    reminder.dailyStatus === 'missed' ? "bg-red-500 text-white" :
+                                                        "bg-gray-200 text-gray-400"
                                         )}>
                                             {reminder.dailyStatus === 'completed' ? <CheckCircle size={12} /> :
                                                 reminder.dailyStatus === 'replied' ? <MessageCircle size={12} /> :
-                                                    <div className="w-1.5 h-1.5 rounded-full bg-current" />}
+                                                    reminder.dailyStatus === 'missed' ? <X size={12} /> :
+                                                        <div className="w-1.5 h-1.5 rounded-full bg-current" />}
                                         </div>
                                         <span className={clsx("text-xs font-medium",
                                             reminder.dailyStatus === 'completed' ? "text-green-600" :
-                                                reminder.dailyStatus === 'replied' ? "text-blue-600" : "text-gray-400")}>
-                                            {reminder.dailyStatus === 'completed' ? 'Done' : 'Reply'}
+                                                reminder.dailyStatus === 'replied' ? "text-blue-600" :
+                                                    reminder.dailyStatus === 'missed' ? "text-red-600" : "text-gray-400")}>
+                                            {reminder.dailyStatus === 'completed' ? 'Done' :
+                                                reminder.dailyStatus === 'missed' ? 'Missed' : 'Reply'}
                                         </span>
                                     </div>
 
@@ -274,7 +337,7 @@ export default function Dashboard() {
                                         <div className={clsx(
                                             "h-6 w-6 rounded-full flex items-center justify-center border-2 border-white shadow-sm transition-colors",
                                             reminder.followUpSent ? "bg-amber-500 text-white" :
-                                                (reminder.dailyStatus === 'completed' || reminder.dailyStatus === 'replied') ? "bg-gray-100 text-gray-300" : // Cancelled/Skipped
+                                                (reminder.dailyStatus === 'completed' || reminder.dailyStatus === 'replied' || reminder.dailyStatus === 'missed') ? "bg-gray-100 text-gray-300" : // Cancelled/Skipped
                                                     "bg-gray-200 text-gray-400"
                                         )}>
                                             <AlertCircle size={12} />
@@ -294,7 +357,8 @@ export default function Dashboard() {
                                         reminder.dailyStatus === 'completed' ? "bg-green-100 text-green-700" :
                                             reminder.dailyStatus === 'replied' ? "bg-blue-100 text-blue-700" :
                                                 reminder.dailyStatus === 'sent' ? "bg-indigo-100 text-indigo-700" :
-                                                    "bg-gray-100 text-gray-500"
+                                                    reminder.dailyStatus === 'missed' ? "bg-red-100 text-red-700" :
+                                                        "bg-gray-100 text-gray-500"
                                     )}>
                                         {reminder.dailyStatus}
                                     </div>
@@ -336,10 +400,10 @@ export default function Dashboard() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="mb-1 block text-sm font-medium text-gray-700">Time (24h)</label>
-                                    <input type="time" required
-                                        className="w-full rounded-lg bg-gray-50 border border-gray-200 p-2.5 text-gray-900 focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
-                                        value={formData.reminderTime} onChange={e => setFormData({ ...formData, reminderTime: e.target.value })}
+                                    <label className="mb-1 block text-sm font-medium text-gray-700">Time (12h)</label>
+                                    <TimePicker
+                                        value={formData.reminderTime}
+                                        onChange={(val) => setFormData({ ...formData, reminderTime: val })}
                                     />
                                 </div>
                             </div>
@@ -371,10 +435,10 @@ export default function Dashboard() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="mb-1 block text-sm font-medium text-gray-700">Follow-up Time</label>
-                                    <input type="time" required
-                                        className="w-full rounded-lg bg-gray-50 border border-gray-200 p-2.5 text-gray-900 focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
-                                        value={formData.followUpTime} onChange={e => setFormData({ ...formData, followUpTime: e.target.value })}
+                                    <label className="mb-1 block text-sm font-medium text-gray-700">Time (12h)</label>
+                                    <TimePicker
+                                        value={formData.followUpTime}
+                                        onChange={(val) => setFormData({ ...formData, followUpTime: val })}
                                     />
                                 </div>
                             </div>
@@ -394,8 +458,60 @@ export default function Dashboard() {
                             </button>
                         </form>
                     </div>
-                </div>
-            )}
+                </div >
+            )
+            }
+        </div >
+    );
+}
+
+// Helper Component for 12h Time Picker
+function TimePicker({ value, onChange }: { value: string, onChange: (val: string) => void }) {
+    // Parse "HH:mm" (24h) to 12h components
+    const [hour24, minute] = value.split(':').map(Number);
+
+    // Convert to 12h
+    const period = hour24 >= 12 ? 'PM' : 'AM';
+    const hour12 = hour24 % 12 || 12; // 0 -> 12, 13 -> 1
+
+    const handleUpdate = (h: number, m: number, p: string) => {
+        let h24 = h;
+        if (p === 'PM' && h !== 12) h24 += 12;
+        if (p === 'AM' && h === 12) h24 = 0;
+
+        const timeStr = `${h24.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+        onChange(timeStr);
+    };
+
+    return (
+        <div className="flex items-center gap-1">
+            <select
+                value={hour12}
+                onChange={e => handleUpdate(Number(e.target.value), minute, period)}
+                className="w-full rounded-lg bg-gray-50 border border-gray-200 p-2.5 text-gray-900 focus:border-indigo-500 focus:outline-none"
+            >
+                {Array.from({ length: 12 }, (_, i) => i + 1).map(h => (
+                    <option key={h} value={h}>{h}</option>
+                ))}
+            </select>
+            <span className="text-gray-400">:</span>
+            <select
+                value={minute}
+                onChange={e => handleUpdate(hour12, Number(e.target.value), period)}
+                className="w-full rounded-lg bg-gray-50 border border-gray-200 p-2.5 text-gray-900 focus:border-indigo-500 focus:outline-none"
+            >
+                {Array.from({ length: 12 }, (_, i) => i * 5).map(m => (
+                    <option key={m} value={m}>{m.toString().padStart(2, '0')}</option>
+                ))}
+            </select>
+            <select
+                value={period}
+                onChange={e => handleUpdate(hour12, minute, e.target.value)}
+                className="w-20 rounded-lg bg-gray-50 border border-gray-200 p-2.5 text-gray-900 focus:border-indigo-500 focus:outline-none"
+            >
+                <option value="AM">AM</option>
+                <option value="PM">PM</option>
+            </select>
         </div>
     );
 }

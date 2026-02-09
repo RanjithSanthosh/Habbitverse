@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
 
     // Check if admin exists. If NO admin exists at all, create one (Seed)
     // This is useful for first-time setup as per "MVP" ease.
-    // Or we expect manual seeding. Prompt didn't specify. I'll allow auto-seed if empty.
+    // Or we expect manual seeding.
     const adminCount = await Admin.countDocuments();
     if (adminCount === 0) {
       const hashedPassword = await bcrypt.hash(password, 10);

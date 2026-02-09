@@ -118,8 +118,7 @@ export async function POST(req: NextRequest) {
       );
 
       for (const reminder of activeReminders) {
-        // --- STRICT TIME CHECK: Prevent Update if Past Follow-Up Time ---
-        // Get current time in IST HH:mm format for comparison
+        // --- STRICT TIME & DATE CHECK ---
         const now = new Date();
         const currentISTTime = now.toLocaleTimeString("en-US", {
           timeZone: "Asia/Kolkata",
@@ -128,24 +127,36 @@ export async function POST(req: NextRequest) {
           minute: "2-digit",
         });
 
-        // Ensure robust comparison (e.g. handle "09:05" vs "9:05" if needed, assuming DB is HH:mm)
-        // String comparison works for 24h format: "23:00" > "19:00" is true.
-        // Edge Case: If followUpTime is "00:05" (next day) and now is "23:55" (prev day), logic fails.
-        // Assuming Reminder/FollowUp follow standard daily logic where FollowUp > Reminder Time on same day.
+        // Date Check (YYYY-MM-DD comparison)
+        const createdDate = reminder.createdAt || new Date();
+        const reminderDateStr = new Date(createdDate).toLocaleDateString(
+          "en-CA",
+          { timeZone: "Asia/Kolkata" },
+        );
+        const isNextDay = todayStr > reminderDateStr;
 
-        if (reminder.followUpTime && currentISTTime > reminder.followUpTime) {
+        // Time Check
+        const isLateTime =
+          reminder.followUpTime && currentISTTime > reminder.followUpTime;
+
+        if (isNextDay || isLateTime) {
           console.log(
-            `[Webhook] ⚠️ Reply received AFTER Follow-Up Time (${currentISTTime} > ${reminder.followUpTime}). Ignoring Update.`,
+            `[Webhook] ⚠️ Reply received LATE. Date: ${isNextDay ? "Next Day" : "Same Day"}, Time: ${currentISTTime} > ${reminder.followUpTime}`,
           );
 
-          // Optional: Notify user they are late?
+          // Mark as MISSED and Deactivate
+          reminder.isActive = false;
+          reminder.dailyStatus = "missed";
+          await reminder.save();
+
+          // Notify user they are late
           if (isCompletion) {
             await sendWhatsAppMessage(
               from,
-              `⏳ It's past the time limit (${reminder.followUpTime}) for this habit. Status not updated.`,
+              `⏳ Too late! The time limit for this habit has passed. Marked as Missed.`,
             );
           }
-          continue; // Skip processing this reminder
+          continue; // Skip further processing
         }
 
         const newStatus = isCompletion ? "completed" : "replied";
