@@ -10,6 +10,11 @@ export interface IReminder {
   followUpTime: string; // HH:MM
   isActive: boolean;
 
+  // Message Config
+  messageType: "text" | "template";
+  templateName?: string;
+  templateLanguage?: string;
+
   // Tracking state
   lastSentAt?: Date;
   followUpSent: boolean;
@@ -36,6 +41,11 @@ const ReminderSchema = new Schema<IReminder>(
 
     followUpMessage: { type: String },
     followUpTime: { type: String }, // Format: "15:00"
+
+    messageType: { type: String, enum: ["text", "template"], default: "text" },
+    templateName: { type: String },
+    templateLanguage: { type: String, default: "en_US" },
+
     isActive: { type: Boolean, default: true },
 
     lastSentAt: { type: Date },
@@ -48,7 +58,7 @@ const ReminderSchema = new Schema<IReminder>(
     replyText: { type: String },
     lastRepliedAt: { type: Date },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // Prevent overwriting model during HMR

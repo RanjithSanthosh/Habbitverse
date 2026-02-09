@@ -36,7 +36,7 @@ import dbConnect from "@/lib/db";
 import Reminder from "@/models/Reminder";
 import ReminderExecution from "@/models/ReminderExecution";
 import MessageLog from "@/models/MessageLog";
-import { sendWhatsAppMessage } from "@/lib/whatsapp";
+import { sendWhatsAppMessage, sendWhatsAppTemplate } from "@/lib/whatsapp";
 import { getISTDate, getISTTime } from "@/lib/dateUtils";
 
 // Helper: Convert "HH:MM" to minutes from midnight
@@ -115,11 +115,19 @@ export async function GET(req: NextRequest) {
           `[Cron] 📨 Sending ONE-TIME Reminder: ${reminder.title} to ${reminder.phone}`,
         );
 
-        const res = await sendWhatsAppMessage(
-          reminder.phone,
-          reminder.message,
-          [{ id: "completed_habit", title: "Completed" }],
-        );
+        let res;
+        if (reminder.messageType === "template") {
+          console.log(`[Cron] Using Template: ${reminder.templateName}`);
+          res = await sendWhatsAppTemplate(
+            reminder.phone,
+            reminder.templateName || "hello_world",
+            reminder.templateLanguage || "en_US",
+          );
+        } else {
+          res = await sendWhatsAppMessage(reminder.phone, reminder.message, [
+            { id: "completed_habit", title: "Completed" },
+          ]);
+        }
 
         // Log the attempt
         await MessageLog.create({

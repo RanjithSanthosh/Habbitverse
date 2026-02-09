@@ -14,6 +14,10 @@ interface Reminder {
     followUpMessage: string;
     followUpTime: string;
 
+    messageType?: 'text' | 'template';
+    templateName?: string;
+    templateLanguage?: string;
+
     isActive: boolean;
     dailyStatus: 'pending' | 'sent' | 'replied' | 'missed' | 'failed' | 'completed';
     replyText?: string;
@@ -34,6 +38,9 @@ export default function Dashboard() {
         reminderTime: '08:00',
         followUpMessage: 'Did you complete your habit?',
         followUpTime: '09:00',
+        messageType: 'text',
+        templateName: 'hello_world',
+        templateLanguage: 'en_US'
     });
     const [submitting, setSubmitting] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
@@ -124,9 +131,14 @@ export default function Dashboard() {
         e.preventDefault();
         setSubmitting(true);
         try {
+            const payload = { ...formData };
+            if (payload.messageType === 'template' && !payload.message) {
+                payload.message = `Template: ${payload.templateName}`;
+            }
+
             const res = await fetch('/api/reminders', {
                 method: 'POST',
-                body: JSON.stringify(formData),
+                body: JSON.stringify(payload),
                 headers: { 'Content-Type': 'application/json' }
             });
             if (res.ok) {
@@ -138,6 +150,9 @@ export default function Dashboard() {
                     reminderTime: '08:00',
                     followUpMessage: 'Did you complete your habit?',
                     followUpTime: '09:00',
+                    messageType: 'text',
+                    templateName: 'hello_world',
+                    templateLanguage: 'en_US'
                 });
                 fetchReminders();
             }
@@ -417,13 +432,61 @@ export default function Dashboard() {
                                 <p className="mt-1 text-xs text-gray-500">10-digit mobile number (India)</p>
                             </div>
 
-                            <div>
-                                <label className="mb-1 block text-sm font-medium text-gray-700">Reminder Message</label>
-                                <textarea required rows={2} placeholder="Time to do your habit!"
-                                    className="w-full rounded-lg bg-gray-50 border border-gray-200 p-2.5 text-gray-900 focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
-                                    value={formData.message} onChange={e => setFormData({ ...formData, message: e.target.value })}
-                                />
-                                <p className="mt-1 text-xs text-gray-500">⚡ This will be sent once at the scheduled time</p>
+                            <div className="bg-white p-3 rounded-lg border border-gray-100 space-y-3">
+                                <label className="block text-sm font-medium text-gray-700">Message Type</label>
+                                <div className="flex gap-4">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input type="radio"
+                                            name="msgType"
+                                            checked={formData.messageType === 'text'}
+                                            onChange={() => setFormData({ ...formData, messageType: 'text' })}
+                                            className="text-indigo-600 focus:ring-indigo-500"
+                                        />
+                                        <span className="text-sm">Custom Text</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input type="radio"
+                                            name="msgType"
+                                            checked={formData.messageType === 'template'}
+                                            onChange={() => setFormData({ ...formData, messageType: 'template' })}
+                                            className="text-indigo-600 focus:ring-indigo-500"
+                                        />
+                                        <span className="text-sm flex items-center gap-1">
+                                            Meta Template
+                                            <span className="bg-green-100 text-green-800 text-[10px] px-1.5 py-0.5 rounded-full font-medium">Bypass 24h</span>
+                                        </span>
+                                    </label>
+                                </div>
+
+                                {formData.messageType === 'text' ? (
+                                    <div>
+                                        <label className="mb-1 block text-sm font-medium text-gray-700">Message Content</label>
+                                        <textarea required rows={2} placeholder="Time to do your habit!"
+                                            className="w-full rounded-lg bg-gray-50 border border-gray-200 p-2.5 text-gray-900 focus:border-indigo-500 focus:outline-none"
+                                            value={formData.message} onChange={e => setFormData({ ...formData, message: e.target.value })}
+                                        />
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="col-span-1">
+                                            <label className="mb-1 block text-sm font-medium text-gray-700">Template Name</label>
+                                            <input type="text" required placeholder="hello_world"
+                                                className="w-full rounded-lg bg-gray-50 border border-gray-200 p-2.5 text-gray-900 focus:border-indigo-500 focus:outline-none"
+                                                value={formData.templateName} onChange={e => setFormData({ ...formData, templateName: e.target.value })}
+                                            />
+                                        </div>
+                                        <div className="col-span-1">
+                                            <label className="mb-1 block text-sm font-medium text-gray-700">Language</label>
+                                            <input type="text" required placeholder="en_US"
+                                                className="w-full rounded-lg bg-gray-50 border border-gray-200 p-2.5 text-gray-900 focus:border-indigo-500 focus:outline-none"
+                                                value={formData.templateLanguage} onChange={e => setFormData({ ...formData, templateLanguage: e.target.value })}
+                                            />
+                                        </div>
+                                        <div className="col-span-2 text-[10px] text-gray-500">
+                                            ⚠️ Creates a conversation window. Use <strong>hello_world</strong> for testing.
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             <div className="grid grid-cols-3 gap-4">
