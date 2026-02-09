@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
   try {
     console.log("🔥 WEBHOOK HIT SUCCESSFULLY 🔥");
     const body = await req.json();
-    // console.log("[Webhook] Payload:", JSON.stringify(body, null, 2));
+    console.log("[Webhook] Payload:", JSON.stringify(body, null, 2));
 
     if (!body.object) {
       return new NextResponse("Not Found", { status: 404 });
