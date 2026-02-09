@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
 
   console.log(`\n========================================`);
   console.log(
-    `[Cron] STARTED at IST: ${todayDateStr} ${nowTimeStr} (${nowMinutes}m)`
+    `[Cron] STARTED at IST: ${todayDateStr} ${nowTimeStr} (${nowMinutes}m)`,
   );
   console.log(`========================================\n`);
 
@@ -94,14 +94,14 @@ export async function GET(req: NextRequest) {
             reminder.isActive = false;
             await reminder.save();
             console.log(
-              `[Cron] ⚡ Deactivated reminder ${reminder._id} (flow complete: ${anyExecution.followUpStatus})`
+              `[Cron] ⚡ Deactivated reminder ${reminder._id} (flow complete: ${anyExecution.followUpStatus})`,
             );
           }
           continue;
         } else {
           // Execution exists but flow NOT complete (waiting for follow-up)
           console.log(
-            `[Cron] ℹ️  Reminder ${reminder._id} already sent, waiting for follow-up (status: ${anyExecution.followUpStatus})`
+            `[Cron] ℹ️  Reminder ${reminder._id} already sent, waiting for follow-up (status: ${anyExecution.followUpStatus})`,
           );
           continue; // Skip sending again, but keep active for follow-up
         }
@@ -112,13 +112,13 @@ export async function GET(req: NextRequest) {
       // Check if it's time to send
       if (nowMinutes >= reminderMinutes) {
         console.log(
-          `[Cron] 📨 Sending ONE-TIME Reminder: ${reminder.title} to ${reminder.phone}`
+          `[Cron] 📨 Sending ONE-TIME Reminder: ${reminder.title} to ${reminder.phone}`,
         );
 
         const res = await sendWhatsAppMessage(
           reminder.phone,
           reminder.message,
-          [{ id: "completed_habit", title: "Completed" }]
+          [{ id: "completed_habit", title: "Completed" }],
         );
 
         // Log the attempt
@@ -154,14 +154,14 @@ export async function GET(req: NextRequest) {
           // Verify the reminder was updated
           const verifiedReminder = await Reminder.findById(reminder._id);
           console.log(
-            `[Cron] ✓ Reminder state verified - isActive: ${verifiedReminder?.isActive}, dailyStatus: ${verifiedReminder?.dailyStatus}`
+            `[Cron] ✓ Reminder state verified - isActive: ${verifiedReminder?.isActive}, dailyStatus: ${verifiedReminder?.dailyStatus}`,
           );
 
           console.log(
-            `[Cron] ✓ Initial reminder sent - keeping active for follow-up`
+            `[Cron] ✓ Initial reminder sent - keeping active for follow-up`,
           );
           console.log(
-            `[Cron] ✓ Created execution record for ${reminder.phone}`
+            `[Cron] ✓ Created execution record for ${reminder.phone}`,
           );
 
           results.push({
@@ -173,7 +173,7 @@ export async function GET(req: NextRequest) {
         } else {
           console.error(
             `[Cron] ✗ Failed to send to ${reminder.phone}:`,
-            res.error
+            res.error,
           );
           results.push({
             id: reminder._id,
@@ -208,7 +208,7 @@ export async function GET(req: NextRequest) {
   }).populate("reminderId");
 
   console.log(
-    `[Cron] Found ${pendingFollowUps.length} candidates for follow-up check\n`
+    `[Cron] Found ${pendingFollowUps.length} candidates for follow-up check\n`,
   );
 
   for (const executionItem of pendingFollowUps) {
@@ -221,7 +221,7 @@ export async function GET(req: NextRequest) {
 
       // CRITICAL: Re-fetch to get LATEST state
       const execution = await ReminderExecution.findById(
-        executionItem._id
+        executionItem._id,
       ).populate("reminderId");
 
       if (!execution) {
@@ -230,13 +230,13 @@ export async function GET(req: NextRequest) {
       }
 
       console.log(
-        `[Cron] After re-fetch - Status: ${execution.status}, FollowUp: ${execution.followUpStatus}`
+        `[Cron] After re-fetch - Status: ${execution.status}, FollowUp: ${execution.followUpStatus}`,
       );
 
       // STRICT CHECK 1: Status must be "sent"
       if (execution.status !== "sent") {
         console.log(
-          `[Cron] ✓ SKIP - Status is "${execution.status}" (not "sent")`
+          `[Cron] ✓ SKIP - Status is "${execution.status}" (not "sent")`,
         );
         continue;
       }
@@ -244,7 +244,7 @@ export async function GET(req: NextRequest) {
       // STRICT CHECK 2: FollowUpStatus must be "pending"
       if (execution.followUpStatus !== "pending") {
         console.log(
-          `[Cron] ✓ SKIP - FollowUpStatus is "${execution.followUpStatus}" (not "pending")`
+          `[Cron] ✓ SKIP - FollowUpStatus is "${execution.followUpStatus}" (not "pending")`,
         );
         continue;
       }
@@ -252,7 +252,7 @@ export async function GET(req: NextRequest) {
       // STRICT CHECK 3: Safety Guard - Check if reply timestamp exists
       if (execution.replyReceivedAt) {
         console.log(
-          `[Cron] ✓ SKIP - Reply received at ${execution.replyReceivedAt} (Safety Guard)`
+          `[Cron] ✓ SKIP - Reply received at ${execution.replyReceivedAt} (Safety Guard)`,
         );
         // Self-healing: Update status if needed
         if (execution.followUpStatus === "pending") {
@@ -287,7 +287,7 @@ export async function GET(req: NextRequest) {
         });
 
         console.log(
-          `[Cron] Found ${recentLogs.length} inbound messages since reminder sent`
+          `[Cron] Found ${recentLogs.length} inbound messages since reminder sent`,
         );
 
         const matchedLog = recentLogs.find((log) => {
@@ -327,10 +327,10 @@ export async function GET(req: NextRequest) {
 
           // Verify the save worked
           const verifiedExecution = await ReminderExecution.findById(
-            execution._id
+            execution._id,
           );
           console.log(
-            `[Cron] ✓ Verified execution - followUpStatus: ${verifiedExecution?.followUpStatus}`
+            `[Cron] ✓ Verified execution - followUpStatus: ${verifiedExecution?.followUpStatus}`,
           );
 
           // Deactivate the reminder - user replied, flow complete
@@ -342,7 +342,7 @@ export async function GET(req: NextRequest) {
             // Verify
             const verifiedConfig = await Reminder.findById(config._id);
             console.log(
-              `[Cron] ⚡ Reminder deactivated (auto-heal) - isActive: ${verifiedConfig?.isActive}`
+              `[Cron] ⚡ Reminder deactivated (auto-heal) - isActive: ${verifiedConfig?.isActive}`,
             );
           }
 
@@ -360,21 +360,21 @@ export async function GET(req: NextRequest) {
 
         // Verify
         const verifiedExecution = await ReminderExecution.findById(
-          execution._id
+          execution._id,
         );
         console.log(
-          `[Cron] ✓ Verified execution - followUpStatus: ${verifiedExecution?.followUpStatus}`
+          `[Cron] ✓ Verified execution - followUpStatus: ${verifiedExecution?.followUpStatus}`,
         );
 
-        // Deactivate the reminder - no follow-up, flow complete
-        config.isActive = false;
-        config.dailyStatus = "completed";
+        // Deactivate the reminder? NO - wait for reply.
+        // config.isActive = false;
+        config.dailyStatus = "sent";
         await config.save();
 
         // Verify
         const verifiedConfig = await Reminder.findById(config._id);
         console.log(
-          `[Cron] ⚡ Reminder deactivated (no follow-up) - isActive: ${verifiedConfig?.isActive}`
+          `[Cron] ⚡ Reminder deactivated (no follow-up) - isActive: ${verifiedConfig?.isActive}`,
         );
 
         continue;
@@ -383,7 +383,7 @@ export async function GET(req: NextRequest) {
       const followUpMinutes = getMinutesFromMidnight(config.followUpTime);
 
       console.log(
-        `[Cron] Follow-up scheduled for: ${config.followUpTime} (${followUpMinutes}m)`
+        `[Cron] Follow-up scheduled for: ${config.followUpTime} (${followUpMinutes}m)`,
       );
       console.log(`[Cron] Current time: ${nowTimeStr} (${nowMinutes}m)`);
 
@@ -393,7 +393,7 @@ export async function GET(req: NextRequest) {
         const reminderMinutes = getMinutesFromMidnight(config.reminderTime);
         if (followUpMinutes <= reminderMinutes) {
           console.warn(
-            `[Cron] ✗ CONFIG ERROR: Follow-up time ${config.followUpTime} is <= Reminder time ${config.reminderTime}`
+            `[Cron] ✗ CONFIG ERROR: Follow-up time ${config.followUpTime} is <= Reminder time ${config.reminderTime}`,
           );
           continue;
         }
@@ -409,8 +409,8 @@ export async function GET(req: NextRequest) {
         if (timeSinceSent < MIN_DELAY_MINUTES) {
           console.log(
             `[Cron] ⏳ Waiting for minimum delay - ${timeSinceSent.toFixed(
-              1
-            )}min since sent (need ${MIN_DELAY_MINUTES}min)`
+              1,
+            )}min since sent (need ${MIN_DELAY_MINUTES}min)`,
           );
           console.log(`[Cron] Will check again in next cron run`);
           continue;
@@ -418,8 +418,8 @@ export async function GET(req: NextRequest) {
 
         console.log(
           `[Cron] ✓ Time check passed - ${timeSinceSent.toFixed(
-            1
-          )}min since initial send`
+            1,
+          )}min since initial send`,
         );
 
         console.log(`[Cron] >>> SENDING FOLLOW-UP <<<`);
@@ -428,7 +428,7 @@ export async function GET(req: NextRequest) {
 
         const res = await sendWhatsAppMessage(
           execution.phone,
-          config.followUpMessage || "Did you complete your habit?"
+          config.followUpMessage || "Did you complete your habit?",
         );
 
         await MessageLog.create({
@@ -447,17 +447,18 @@ export async function GET(req: NextRequest) {
           await execution.save();
 
           // ============================================================
-          // ONE-TIME EXECUTION: Deactivate after follow-up sent
-          // The complete flow is now finished
+          // LOGIC UPDATE:
+          // Do NOT deactivate reminder here. Keep it active so the Webhook
+          // can receive a reply if the user responds to this follow-up.
+          // Do NOT mark as "completed" - the user hasn't replied yet!
+          //
+          // The Cron Job will skip this reminder in future runs because
+          // execution.followUpStatus is now "sent".
           // ============================================================
-          config.isActive = false;
-          config.dailyStatus = "completed";
-          await config.save();
 
-          // Verify deactivation
-          const verifiedConfig = await Reminder.findById(config._id);
+          console.log(`[Cron] ✓ Follow-up SENT successfully`);
           console.log(
-            `[Cron] ✓ Verified - isActive: ${verifiedConfig?.isActive}, dailyStatus: ${verifiedConfig?.dailyStatus}`
+            `[Cron] ⚡ Reminder remains ACTIVE awaiting user reply...`,
           );
 
           console.log(`[Cron] ✓ Follow-up SENT successfully`);
@@ -482,13 +483,13 @@ export async function GET(req: NextRequest) {
         console.log(
           `[Cron] ✓ SKIP - Not time yet (need ${
             followUpMinutes - nowMinutes
-          } more minutes)`
+          } more minutes)`,
         );
       }
     } catch (err: any) {
       console.error(
         `[Cron] ✗ Error processing follow-up ${executionItem._id}:`,
-        err
+        err,
       );
       results.push({
         id: executionItem._id,

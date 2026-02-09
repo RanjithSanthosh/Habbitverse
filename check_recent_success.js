@@ -18,12 +18,13 @@ async function checkRecent() {
     if (logs.length === 0) {
         console.log("No logs found in last 15 mins.");
     } else {
-        logs.forEach(l => {
-            console.log(`[${l.direction}] ${l.messageType} | Status: ${l.status || 'unknown'}`);
-            console.log(`Content: ${l.content?.substring(0, 30)}`);
-            if (l.rawResponse && l.rawResponse.error) {
-                console.log(`❌ Error: ${JSON.stringify(l.rawResponse.error)}`);
-            } else if (l.direction === 'outbound') {
+        logs.forEach(log => {
+            console.log(`[${log.direction}] ${log.messageType} | Status: ${log.status}`);
+            console.log(`Time: ${new Date(log.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`);
+            console.log(`Content: ${log.content?.substring(0, 30)}`);
+            if (log.rawResponse && log.rawResponse.error) {
+                console.log(`❌ Error: ${JSON.stringify(log.rawResponse.error)}`);
+            } else if (log.direction === 'outbound') {
                 console.log(`✅ Success (No Error recorded)`);
             }
             console.log('---');
